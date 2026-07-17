@@ -1,0 +1,29 @@
+name: SoulGolem
+version: '${version}'
+main: bm.b0b0b0.SoulGolem.SoulGolem
+api-version: '1.21'
+authors: [ b0b0b0 ]
+folia-supported: true
+commands:
+  soulgolem:
+    description: SoulGolem administration
+    usage: /soulgolem <give|reload|list>
+    aliases: [ sg, sgol ]
+permissions:
+  soulgolem.admin:
+    description: Full admin access
+    default: op
+  soulgolem.use:
+    description: Place and manage own golems
+    default: true
+  soulgolem.give:
+    description: Give statue items
+    default: op
+  soulgolem.reload:
+    description: Reload configuration
+    default: op
+libraries:
+  - net.elytrium:serializer:1.1.1
+  - com.zaxxer:HikariCP:5.1.0
+  - org.xerial:sqlite-jdbc:3.46.1.3
+  - com.mysql:mysql-connector-j:8.4.0
