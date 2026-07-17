@@ -24,6 +24,9 @@ public final class ActiveGolem {
     private boolean fetchingSeed;
     private boolean fetchingTorch;
     private boolean fetchingBoneMeal;
+    private boolean fetchingCraft;
+    private boolean fetchingComposter;
+    private boolean fetchingCompost;
     private boolean fetchingSeat;
     private boolean fetchingFeed;
     private boolean fetchingFence;
@@ -43,6 +46,7 @@ public final class ActiveGolem {
     private double pathGoalX = Double.NaN;
     private double pathGoalZ = Double.NaN;
     private long gateOpenSeenAt;
+    private long harvestNoticeUntil;
     private boolean dirty;
     private boolean pauseAfterRest;
     private boolean resumeSeatRest;
@@ -172,6 +176,36 @@ public final class ActiveGolem {
 
     public void fetchingBoneMeal(boolean fetchingBoneMeal) {
         this.fetchingBoneMeal = fetchingBoneMeal;
+    }
+
+    public boolean fetchingCraft() {
+        return this.fetchingCraft;
+    }
+
+    public void fetchingCraft(boolean fetchingCraft) {
+        this.fetchingCraft = fetchingCraft;
+    }
+
+    public boolean fetchingComposter() {
+        return this.fetchingComposter;
+    }
+
+    public void fetchingComposter(boolean fetchingComposter) {
+        this.fetchingComposter = fetchingComposter;
+        if (fetchingComposter) {
+            this.fetchingCompost = false;
+        }
+    }
+
+    public boolean fetchingCompost() {
+        return this.fetchingCompost;
+    }
+
+    public void fetchingCompost(boolean fetchingCompost) {
+        this.fetchingCompost = fetchingCompost;
+        if (fetchingCompost) {
+            this.fetchingComposter = false;
+        }
     }
 
     public boolean fetchingSeat() {
@@ -348,10 +382,35 @@ public final class ActiveGolem {
         this.gateOpenSeenAt = gateOpenSeenAt;
     }
 
+    public long harvestNoticeUntil() {
+        return this.harvestNoticeUntil;
+    }
+
+    public void armHarvestNotice(long ticks) {
+        long ms = Math.max(0L, ticks) * 50L;
+        if (ms <= 0L) {
+            this.harvestNoticeUntil = 0L;
+            return;
+        }
+        long until = System.currentTimeMillis() + ms;
+        this.harvestNoticeUntil = Math.max(this.harvestNoticeUntil, until);
+    }
+
+    public boolean harvestNoticeReady() {
+        return this.harvestNoticeUntil <= 0L || System.currentTimeMillis() >= this.harvestNoticeUntil;
+    }
+
+    public void clearHarvestNotice() {
+        this.harvestNoticeUntil = 0L;
+    }
+
     public void clearFetchFlags() {
         this.fetchingSeed = false;
         this.fetchingTorch = false;
         this.fetchingBoneMeal = false;
+        this.fetchingCraft = false;
+        this.fetchingComposter = false;
+        this.fetchingCompost = false;
         this.fetchingSeat = false;
         this.fetchingFeed = false;
         this.fetchingFence = false;

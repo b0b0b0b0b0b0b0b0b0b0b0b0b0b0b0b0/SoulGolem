@@ -161,6 +161,39 @@ public final class SoulChestService {
         return best;
     }
 
+    public Location findCraftingTableLocation(SoulGolemData data) {
+        World world = Bukkit.getWorld(data.worldName());
+        if (world == null) {
+            return null;
+        }
+        if (data.hasCraftStation()) {
+            int x = (int) Math.floor(data.craftX());
+            int y = (int) Math.floor(data.craftY());
+            int z = (int) Math.floor(data.craftZ());
+            Block at = world.getBlockAt(x, y, z);
+            Material type = at.getType();
+            if (type == Material.CRAFTING_TABLE
+                    || type.isAir()
+                    || FarmAreaService.isVegetation(type)
+                    || type == Material.SNOW) {
+                return new Location(world, x, y, z);
+            }
+        }
+        Location chest = new Location(
+                world,
+                Math.floor(data.chestX()),
+                Math.floor(data.chestY()),
+                Math.floor(data.chestZ())
+        );
+        Location home = new Location(
+                world,
+                Math.floor(data.homeX()) + 0.5D,
+                Math.floor(data.homeY()),
+                Math.floor(data.homeZ()) + 0.5D
+        );
+        return findCraftingTableLocation(chest, home, effectiveRadius(data));
+    }
+
     private Location closerCraftBorder(
             Location current,
             double currentDist,
@@ -205,7 +238,7 @@ public final class SoulChestService {
         }
         Block station = world.getBlockAt(x, homeY + 1, z);
         Material stationType = station.getType();
-        if (isChestLike(stationType) || stationType == Material.CRAFTING_TABLE) {
+        if (isChestLike(stationType) || stationType == Material.CRAFTING_TABLE || stationType == Material.COMPOSTER) {
             return false;
         }
         if (stationType == Material.BEDROCK || stationType == Material.OBSIDIAN) {
@@ -228,7 +261,7 @@ public final class SoulChestService {
             if (type.isAir()) {
                 continue;
             }
-            if (isChestLike(type) || type == Material.CRAFTING_TABLE) {
+            if (isChestLike(type) || type == Material.CRAFTING_TABLE || type == Material.COMPOSTER) {
                 continue;
             }
             if (!canClearForStation(type)) {
@@ -245,7 +278,7 @@ public final class SoulChestService {
         if (type == Material.BEDROCK || type == Material.OBSIDIAN || type == Material.BARRIER) {
             return false;
         }
-        if (isChestLike(type) || type == Material.CRAFTING_TABLE) {
+        if (isChestLike(type) || type == Material.CRAFTING_TABLE || type == Material.COMPOSTER) {
             return false;
         }
         return type.isSolid()
@@ -273,6 +306,26 @@ public final class SoulChestService {
         return type == Material.CHEST || Tag.COPPER_CHESTS.isTagged(type);
     }
 
+    public static Material waxedCopperChest(Material type) {
+        if (type == null) {
+            return Material.WAXED_COPPER_CHEST;
+        }
+        return switch (type) {
+            case COPPER_CHEST -> Material.WAXED_COPPER_CHEST;
+            case EXPOSED_COPPER_CHEST -> Material.WAXED_EXPOSED_COPPER_CHEST;
+            case WEATHERED_COPPER_CHEST -> Material.WAXED_WEATHERED_COPPER_CHEST;
+            case OXIDIZED_COPPER_CHEST -> Material.WAXED_OXIDIZED_COPPER_CHEST;
+            default -> type;
+        };
+    }
+
+    public static boolean isUnwaxedCopperChest(Material type) {
+        return type == Material.COPPER_CHEST
+                || type == Material.EXPOSED_COPPER_CHEST
+                || type == Material.WEATHERED_COPPER_CHEST
+                || type == Material.OXIDIZED_COPPER_CHEST;
+    }
+
     public void placeChest(Location location, UUID golemId, UUID ownerUuid) {
         placeChest(location, golemId, ownerUuid, null);
     }
@@ -280,12 +333,12 @@ public final class SoulChestService {
     public void placeChest(Location location, UUID golemId, UUID ownerUuid, Location faceToward) {
         Block block = location.getBlock();
         ensureStationSupport(block);
-        BlockData blockData = Material.COPPER_CHEST.createBlockData();
+        BlockData blockData = Material.WAXED_COPPER_CHEST.createBlockData();
         if (blockData instanceof Directional directional) {
             directional.setFacing(faceTowardHome(location, faceToward));
             block.setBlockData(directional, false);
         } else {
-            block.setType(Material.COPPER_CHEST, false);
+            block.setType(Material.WAXED_COPPER_CHEST, false);
         }
         applyChestMeta(block, golemId, ownerUuid);
     }
@@ -301,11 +354,46 @@ public final class SoulChestService {
             return;
         }
         ensureStationSupport(block);
+        ensureChestWaxed(block, golemId, ownerUuid, faceToward);
         if (faceToward != null && block.getBlockData() instanceof Directional directional) {
             directional.setFacing(faceTowardHome(location, faceToward));
             block.setBlockData(directional, false);
         }
         applyChestMeta(block, golemId, ownerUuid);
+    }
+
+    public void ensureChestWaxed(Block block) {
+        if (block == null || !isSoulChest(block) || !isUnwaxedCopperChest(block.getType())) {
+            return;
+        }
+        UUID golemId = golemIdFromChest(block);
+        UUID owner = ownerFromChest(block);
+        if (golemId == null) {
+            return;
+        }
+        ensureChestWaxed(block, golemId, owner, null);
+    }
+
+    private void ensureChestWaxed(Block block, UUID golemId, UUID ownerUuid, Location faceToward) {
+        Material current = block.getType();
+        if (!isUnwaxedCopperChest(current)) {
+            return;
+        }
+        Material waxed = waxedCopperChest(current);
+        org.bukkit.block.BlockFace facing = faceTowardHome(block.getLocation(), faceToward);
+        if (block.getBlockData() instanceof Directional directional) {
+            facing = directional.getFacing();
+        }
+        BlockData blockData = waxed.createBlockData();
+        if (blockData instanceof Directional directional) {
+            directional.setFacing(facing);
+            block.setBlockData(directional, false);
+        } else {
+            block.setType(waxed, false);
+        }
+        if (golemId != null) {
+            applyChestMeta(block, golemId, ownerUuid == null ? golemId : ownerUuid);
+        }
     }
 
     private static org.bukkit.block.BlockFace faceTowardHome(Location chest, Location home) {
@@ -356,6 +444,76 @@ public final class SoulChestService {
         }
         ensureStationSupport(block);
         spawnOrRefreshCraftHologram(block, golemId);
+    }
+
+    public Location findComposterLocation(SoulGolemData data) {
+        World world = Bukkit.getWorld(data.worldName());
+        if (world == null) {
+            return null;
+        }
+        int homeY = (int) Math.floor(data.homeY());
+        int hx = (int) Math.floor(data.homeX());
+        int hz = (int) Math.floor(data.homeZ());
+        int r = effectiveRadius(data);
+        int[][] neighbors = {
+                {1, 0}, {-1, 0}, {0, 1}, {0, -1},
+                {1, 1}, {1, -1}, {-1, 1}, {-1, -1}
+        };
+        int ax;
+        int az;
+        if (data.hasCraftStation()) {
+            ax = (int) Math.floor(data.craftX());
+            az = (int) Math.floor(data.craftZ());
+        } else {
+            ax = (int) Math.floor(data.chestX());
+            az = (int) Math.floor(data.chestZ());
+        }
+        int cx = (int) Math.floor(data.chestX());
+        int cz = (int) Math.floor(data.chestZ());
+        int fx = data.hasCraftStation() ? (int) Math.floor(data.craftX()) : Integer.MIN_VALUE;
+        int fz = data.hasCraftStation() ? (int) Math.floor(data.craftZ()) : Integer.MIN_VALUE;
+        Location best = null;
+        double bestDist = Double.MAX_VALUE;
+        for (int[] n : neighbors) {
+            int x = ax + n[0];
+            int z = az + n[1];
+            if (x == cx && z == cz) {
+                continue;
+            }
+            if (x == fx && z == fz) {
+                continue;
+            }
+            if (!onPerimeter(x, z, hx, hz, r)) {
+                continue;
+            }
+            if (!canHostStationOnBorder(world, x, homeY, z)) {
+                continue;
+            }
+            Location spot = new Location(world, x, homeY + 1, z);
+            double dist = (x - ax) * (x - ax) + (z - az) * (z - az);
+            if (dist < bestDist) {
+                bestDist = dist;
+                best = spot;
+            }
+        }
+        return best;
+    }
+
+    public void placeComposter(Location location, UUID golemId) {
+        Block block = location.getBlock();
+        ensureStationSupport(block);
+        block.setType(Material.COMPOSTER, false);
+        spawnOrRefreshCompostHologram(block, golemId);
+    }
+
+    public void tagExistingComposter(Location location, UUID golemId) {
+        Block block = location.getBlock();
+        if (block.getType() != Material.COMPOSTER) {
+            placeComposter(location, golemId);
+            return;
+        }
+        ensureStationSupport(block);
+        spawnOrRefreshCompostHologram(block, golemId);
     }
 
     private void ensureStationSupport(Block station) {
@@ -414,6 +572,7 @@ public final class SoulChestService {
     public void removeHologram(SoulGolemData data) {
         removeChestHologram(data);
         removeCraftHologram(data);
+        removeCompostHologram(data);
     }
 
     public void removeChestHologram(SoulGolemData data) {
@@ -486,6 +645,46 @@ public final class SoulChestService {
         });
     }
 
+    private void spawnOrRefreshCompostHologram(Block block, UUID golemId) {
+        Settings.TextDisplays style = this.config.settings().visuals.textDisplays;
+        if (!style.enabled) {
+            return;
+        }
+        Component name = MINI.deserialize("<#C084FC>Soul Compost</#C084FC>");
+        Location at = block.getLocation().add(0.5D, style.chestOffsetY, 0.5D);
+        for (org.bukkit.entity.Entity nearby : block.getWorld().getNearbyEntities(at, 0.8D, 0.8D, 0.8D)) {
+            if (nearby instanceof TextDisplay display) {
+                String raw = display.getPersistentDataContainer().get(this.keys.compostGolemId(), PersistentDataType.STRING);
+                if (golemId.toString().equals(raw)) {
+                    display.text(name);
+                    TextDisplayStyle.applyChestHologram(display, style);
+                    display.teleport(at);
+                    return;
+                }
+            }
+        }
+        block.getWorld().spawn(at, TextDisplay.class, display -> {
+            display.text(name);
+            display.getPersistentDataContainer().set(this.keys.compostGolemId(), PersistentDataType.STRING, golemId.toString());
+            TextDisplayStyle.applyChestHologram(display, style);
+        });
+    }
+
+    public void removeCompostHologram(SoulGolemData data) {
+        World world = Bukkit.getWorld(data.worldName());
+        if (world == null || !data.hasCompostStation()) {
+            return;
+        }
+        float offsetY = this.config.settings().visuals.textDisplays.chestOffsetY;
+        Location at = new Location(
+                world,
+                Math.floor(data.compostX()) + 0.5D,
+                data.compostY() + offsetY,
+                Math.floor(data.compostZ()) + 0.5D
+        );
+        removeDisplaysAt(at, this.keys.compostGolemId(), data.id().toString(), 2.0D);
+    }
+
     public void removeCraftingTable(SoulGolemData data) {
         World world = Bukkit.getWorld(data.worldName());
         if (world == null) {
@@ -517,6 +716,24 @@ public final class SoulChestService {
                         block.setType(Material.AIR, false);
                     }
                 }
+            }
+        }
+    }
+
+    public void removeComposter(SoulGolemData data) {
+        World world = Bukkit.getWorld(data.worldName());
+        if (world == null) {
+            return;
+        }
+        removeCompostHologram(data);
+        if (data.hasCompostStation()) {
+            Block compost = world.getBlockAt(
+                    (int) Math.floor(data.compostX()),
+                    (int) Math.floor(data.compostY()),
+                    (int) Math.floor(data.compostZ())
+            );
+            if (compost.getType() == Material.COMPOSTER) {
+                compost.setType(Material.AIR, false);
             }
         }
     }
@@ -576,6 +793,11 @@ public final class SoulChestService {
                         if (golemId.equals(tagged) || craftHologramMatches(block, golemId)) {
                             block.setType(Material.AIR, false);
                         }
+                    } else if (block.getType() == Material.COMPOSTER) {
+                        UUID tagged = golemIdFromCompost(block);
+                        if (golemId.equals(tagged) || compostHologramMatches(block, golemId)) {
+                            block.setType(Material.AIR, false);
+                        }
                     }
                 }
             }
@@ -583,6 +805,7 @@ public final class SoulChestService {
         Location hologramCenter = center.clone().add(0.0D, 1.0D, 0.0D);
         removeDisplaysAt(hologramCenter, this.keys.chestGolemId(), id, r + 4.0D);
         removeDisplaysAt(hologramCenter, this.keys.craftGolemId(), id, r + 4.0D);
+        removeDisplaysAt(hologramCenter, this.keys.compostGolemId(), id, r + 4.0D);
         GolemDisplay.removeAllNear(world, center, r + 16.0D, id, this.keys);
     }
 
@@ -596,7 +819,11 @@ public final class SoulChestService {
                 (int) Math.floor(data.chestY()),
                 (int) Math.floor(data.chestZ())
         );
-        return isChestLike(chest.getType()) && isSoulChest(chest);
+        if (!isChestLike(chest.getType()) || !isSoulChest(chest)) {
+            return false;
+        }
+        ensureChestWaxed(chest);
+        return true;
     }
 
     public boolean isCraftPresent(SoulGolemData data) {
@@ -615,6 +842,22 @@ public final class SoulChestService {
         return craft.getType() == Material.CRAFTING_TABLE;
     }
 
+    public boolean isCompostPresent(SoulGolemData data) {
+        if (!data.hasCompostStation()) {
+            return false;
+        }
+        World world = Bukkit.getWorld(data.worldName());
+        if (world == null) {
+            return false;
+        }
+        Block compost = world.getBlockAt(
+                (int) Math.floor(data.compostX()),
+                (int) Math.floor(data.compostY()),
+                (int) Math.floor(data.compostZ())
+        );
+        return compost.getType() == Material.COMPOSTER;
+    }
+
     public Location chestStandLocation(SoulGolemData data) {
         return standBeside(data, (int) Math.floor(data.chestX()), (int) Math.floor(data.chestY()), (int) Math.floor(data.chestZ()));
     }
@@ -624,6 +867,18 @@ public final class SoulChestService {
             return null;
         }
         return standBeside(data, (int) Math.floor(data.craftX()), (int) Math.floor(data.craftY()), (int) Math.floor(data.craftZ()));
+    }
+
+    public Location compostStandLocation(SoulGolemData data) {
+        if (!data.hasCompostStation()) {
+            return null;
+        }
+        return standBeside(
+                data,
+                (int) Math.floor(data.compostX()),
+                (int) Math.floor(data.compostY()),
+                (int) Math.floor(data.compostZ())
+        );
     }
 
     private Location standBeside(SoulGolemData data, int cx, int cy, int cz) {
@@ -701,11 +956,20 @@ public final class SoulChestService {
         int fx = (int) Math.floor(data.craftX());
         int fy = (int) Math.floor(data.craftY());
         int fz = (int) Math.floor(data.craftZ());
-        return block.getX() == fx && block.getZ() == fz && (block.getY() == fy || block.getY() == fy - 1);
+        if (block.getX() == fx && block.getZ() == fz && (block.getY() == fy || block.getY() == fy - 1)) {
+            return true;
+        }
+        if (!data.hasCompostStation()) {
+            return false;
+        }
+        int px = (int) Math.floor(data.compostX());
+        int py = (int) Math.floor(data.compostY());
+        int pz = (int) Math.floor(data.compostZ());
+        return block.getX() == px && block.getZ() == pz && (block.getY() == py || block.getY() == py - 1);
     }
 
     public boolean isStationBlock(Material type) {
-        return isChestLike(type) || type == Material.CRAFTING_TABLE;
+        return isChestLike(type) || type == Material.CRAFTING_TABLE || type == Material.COMPOSTER;
     }
 
     public boolean isSoulChest(Block block) {
@@ -750,6 +1014,55 @@ public final class SoulChestService {
             }
         }
         return null;
+    }
+
+    public boolean isSoulComposter(Block block, SoulGolemData data) {
+        if (block.getType() != Material.COMPOSTER || !data.hasCompostStation()) {
+            return false;
+        }
+        if (block.getX() == (int) Math.floor(data.compostX())
+                && block.getY() == (int) Math.floor(data.compostY())
+                && block.getZ() == (int) Math.floor(data.compostZ())) {
+            return true;
+        }
+        return compostHologramMatches(block, data.id());
+    }
+
+    public boolean isSoulComposter(Block block) {
+        return block.getType() == Material.COMPOSTER && golemIdFromCompost(block) != null;
+    }
+
+    public UUID golemIdFromCompost(Block block) {
+        if (block.getType() != Material.COMPOSTER) {
+            return null;
+        }
+        Settings.TextDisplays style = this.config.settings().visuals.textDisplays;
+        Location at = block.getLocation().add(0.5D, style.chestOffsetY, 0.5D);
+        for (org.bukkit.entity.Entity nearby : block.getWorld().getNearbyEntities(at, 0.8D, 0.8D, 0.8D)) {
+            if (!(nearby instanceof TextDisplay display)) {
+                continue;
+            }
+            String raw = display.getPersistentDataContainer().get(this.keys.compostGolemId(), PersistentDataType.STRING);
+            if (raw != null && !raw.isEmpty()) {
+                return UUID.fromString(raw);
+            }
+        }
+        return null;
+    }
+
+    private boolean compostHologramMatches(Block block, UUID golemId) {
+        Settings.TextDisplays style = this.config.settings().visuals.textDisplays;
+        Location at = block.getLocation().add(0.5D, style.chestOffsetY, 0.5D);
+        for (org.bukkit.entity.Entity nearby : block.getWorld().getNearbyEntities(at, 0.8D, 0.8D, 0.8D)) {
+            if (!(nearby instanceof TextDisplay display)) {
+                continue;
+            }
+            String raw = display.getPersistentDataContainer().get(this.keys.compostGolemId(), PersistentDataType.STRING);
+            if (golemId.toString().equals(raw)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public UUID golemIdFromChest(Block block) {
@@ -839,6 +1152,60 @@ public final class SoulChestService {
             }
         }
         return null;
+    }
+
+    public Material findFenceInChest(SoulGolemData data, Material preferred) {
+        if (preferred != null && Tag.FENCES.isTagged(preferred) && countItem(data, preferred) > 0) {
+            return preferred;
+        }
+        Chest chest = chestAt(data);
+        if (chest == null) {
+            return null;
+        }
+        for (ItemStack stack : chest.getBlockInventory().getContents()) {
+            if (stack != null && !stack.isEmpty() && Tag.FENCES.isTagged(stack.getType())) {
+                return stack.getType();
+            }
+        }
+        return null;
+    }
+
+    public Material findGateInChest(SoulGolemData data, Material preferred) {
+        if (preferred != null && Tag.FENCE_GATES.isTagged(preferred) && countItem(data, preferred) > 0) {
+            return preferred;
+        }
+        Chest chest = chestAt(data);
+        if (chest == null) {
+            return null;
+        }
+        for (ItemStack stack : chest.getBlockInventory().getContents()) {
+            if (stack != null && !stack.isEmpty() && Tag.FENCE_GATES.isTagged(stack.getType())) {
+                return stack.getType();
+            }
+        }
+        return null;
+    }
+
+    public int countFencesInChest(SoulGolemData data) {
+        return countTaggedInChest(data, Tag.FENCES);
+    }
+
+    public int countGatesInChest(SoulGolemData data) {
+        return countTaggedInChest(data, Tag.FENCE_GATES);
+    }
+
+    private int countTaggedInChest(SoulGolemData data, Tag<Material> tag) {
+        Chest chest = chestAt(data);
+        if (chest == null) {
+            return 0;
+        }
+        int total = 0;
+        for (ItemStack stack : chest.getBlockInventory().getContents()) {
+            if (stack != null && !stack.isEmpty() && tag.isTagged(stack.getType())) {
+                total += stack.getAmount();
+            }
+        }
+        return total;
     }
 
     public boolean takeItem(SoulGolemData data, Material material, int amount) {

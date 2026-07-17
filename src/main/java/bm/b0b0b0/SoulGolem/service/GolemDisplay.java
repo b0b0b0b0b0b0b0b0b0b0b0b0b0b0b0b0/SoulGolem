@@ -69,6 +69,12 @@ public final class GolemDisplay {
                     if (golem.fetchingBoneMeal()) {
                         yield "golem-status-bonemeal";
                     }
+                    if (golem.fetchingCraft()) {
+                        yield "golem-status-place-craft";
+                    }
+                    if (golem.fetchingComposter() || golem.fetchingCompost()) {
+                        yield "golem-status-compost";
+                    }
                     if (golem.fetchingWeapon()) {
                         yield "golem-status-combat";
                     }
@@ -76,8 +82,12 @@ public final class GolemDisplay {
                 }
                 case WAITING_CHEST -> "golem-status-waiting-chest";
                 case MOVING_TO_CRAFT, CRAFTING -> "golem-status-crafting";
+                case MOVING_TO_PLACE_CRAFT, PLACING_CRAFT -> "golem-status-place-craft";
                 case MOVING_TO_TORCH, PLACING_TORCH -> "golem-status-torch";
                 case MOVING_TO_BONEMEAL, APPLYING_BONEMEAL -> "golem-status-bonemeal";
+                case MOVING_TO_PLACE_COMPOSTER, PLACING_COMPOSTER,
+                     MOVING_TO_COMPOST, COMPOSTING,
+                     MOVING_TO_COLLECT_COMPOST, COLLECTING_COMPOST -> "golem-status-compost";
                 case RESTING -> "golem-status-waiting-crop";
                 case MOVING_TO_SETUP_CLEAR, SETUP_CLEAR,
                      MOVING_TO_SETUP_BORDER, SETUP_BORDER,
@@ -249,7 +259,11 @@ public final class GolemDisplay {
             return true;
         }
         String craft = display.getPersistentDataContainer().get(keys.craftGolemId(), PersistentDataType.STRING);
-        return golemId.equals(craft);
+        if (golemId.equals(craft)) {
+            return true;
+        }
+        String compost = display.getPersistentDataContainer().get(keys.compostGolemId(), PersistentDataType.STRING);
+        return golemId.equals(compost);
     }
 
     private static boolean isGolemNameplate(TextDisplay display, String golemId, PluginKeys keys) {

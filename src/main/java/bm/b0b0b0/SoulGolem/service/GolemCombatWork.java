@@ -474,6 +474,8 @@ public final class GolemCombatWork {
                 || golem.fetchingFence()
                 || golem.fetchingGate()
                 || golem.fetchingBoneMeal()
+                || golem.fetchingComposter()
+                || golem.fetchingCompost()
                 || golem.fetchingFeed()
                 || golem.fetchingPickaxe();
     }

@@ -5,6 +5,7 @@ import bm.b0b0b0.SoulGolem.config.ConfigurationLoader;
 import bm.b0b0b0.SoulGolem.config.PluginConfig;
 import bm.b0b0b0.SoulGolem.database.DatabaseManager;
 import bm.b0b0b0.SoulGolem.item.StatueItemFactory;
+import bm.b0b0b0.SoulGolem.item.StatueRecipeService;
 import bm.b0b0b0.SoulGolem.listener.GolemGuiListener;
 import bm.b0b0b0.SoulGolem.listener.GolemListener;
 import bm.b0b0b0.SoulGolem.repository.GolemRepository;
@@ -32,6 +33,7 @@ public final class SoulGolem extends JavaPlugin {
     private DatabaseManager databaseManager;
     private GolemLifecycleService lifecycleService;
     private WorkAreaService workAreaService;
+    private StatueRecipeService statueRecipes;
 
     @Override
     public void onEnable() {
@@ -47,6 +49,12 @@ public final class SoulGolem extends JavaPlugin {
         PluginConfig config = this.configurationLoader.config();
         PluginKeys keys = new PluginKeys(this);
         StatueItemFactory statueFactory = new StatueItemFactory(keys, this.configurationLoader::messages);
+        this.statueRecipes = new StatueRecipeService(
+                this,
+                statueFactory,
+                () -> this.configurationLoader.config().settings()
+        );
+        this.statueRecipes.register();
         GolemRegistry registry = new GolemRegistry();
         OreTableService oreTable = new OreTableService(config);
         SoulChestService chestService = new SoulChestService(
@@ -161,6 +169,7 @@ public final class SoulGolem extends JavaPlugin {
         SoulGolemCommand command = new SoulGolemCommand(
                 this.configurationLoader,
                 statueFactory,
+                this.statueRecipes,
                 oreTable,
                 chestService,
                 guiService
@@ -175,6 +184,9 @@ public final class SoulGolem extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (this.statueRecipes != null) {
+            this.statueRecipes.unregister();
+        }
         if (this.lifecycleService != null) {
             this.lifecycleService.shutdown();
         }

@@ -47,20 +47,23 @@ public final class GolemFenceWork {
             return Phase.DISABLED;
         }
         int radius = this.chestService.effectiveRadius(golem.data());
-        Material fence = this.farmAreaService.resolveFenceMaterial(golem.data());
-        Material gate = this.farmAreaService.resolveGateMaterial(golem.data());
         if (!this.farmAreaService.canProgressOuterFence(
-                golem.data(), radius, countCarried(golem, fence), countCarried(golem, gate))) {
+                golem.data(), radius, countCarriedFences(golem), countCarriedGates(golem))) {
             return Phase.PAUSE;
         }
         golem.clearFetchFlags();
-        if (countCarried(golem, fence) > 0 || countCarried(golem, gate) > 0) {
+        if (countCarriedFences(golem) > 0 || countCarriedGates(golem) > 0) {
             return Phase.MOVING_FENCE;
         }
         if (this.farmAreaService.outerFenceSlots(golem.data(), radius).isEmpty()
                 && this.farmAreaService.needsOuterFenceGate(golem.data(), radius)) {
             golem.fetchingGate(true);
             return Phase.FETCH_GATE;
+        }
+        if (this.farmAreaService.outerFenceSlots(golem.data(), radius).isEmpty()
+                && !this.farmAreaService.needsOuterFenceGate(golem.data(), radius)
+                && this.farmAreaService.needsGatePath(golem.data(), radius)) {
+            return Phase.MOVING_GATE;
         }
         golem.fetchingFence(true);
         return Phase.FETCH_FENCE;
@@ -81,8 +84,6 @@ public final class GolemFenceWork {
             return Phase.MOVING_FENCE;
         }
         int radius = this.chestService.effectiveRadius(golem.data());
-        Material fence = this.farmAreaService.resolveFenceMaterial(golem.data());
-        Material gate = this.farmAreaService.resolveGateMaterial(golem.data());
 
         List<Block> junk = this.farmAreaService.outerFenceObstructions(golem.data(), radius);
         if (!junk.isEmpty()) {
@@ -91,9 +92,10 @@ public final class GolemFenceWork {
 
         List<Block> slots = this.farmAreaService.outerFenceSlots(golem.data(), radius);
         if (!slots.isEmpty()) {
-            if (countCarried(golem, fence) <= 0) {
-                if (this.chestService.countItem(golem.data(), fence) > 0) {
-                    returnMaterial(golem, gate);
+            Material fence = firstCarriedFence(golem);
+            if (fence == null) {
+                if (this.chestService.countFencesInChest(golem.data()) > 0) {
+                    returnGates(golem);
                     golem.clearFetchFlags();
                     golem.fetchingFence(true);
                     return Phase.FETCH_FENCE;
@@ -106,9 +108,10 @@ public final class GolemFenceWork {
         }
 
         if (this.farmAreaService.needsOuterFenceGate(golem.data(), radius)) {
-            if (countCarried(golem, gate) <= 0) {
-                if (this.chestService.countItem(golem.data(), gate) > 0) {
-                    returnMaterial(golem, fence);
+            Material gate = firstCarriedGate(golem);
+            if (gate == null) {
+                if (this.chestService.countGatesInChest(golem.data()) > 0) {
+                    returnFences(golem);
                     golem.clearFetchFlags();
                     golem.fetchingGate(true);
                     return Phase.FETCH_GATE;
@@ -120,6 +123,10 @@ public final class GolemFenceWork {
             return placeGate(golem, copper, gate, onEnergy);
         }
 
+        if (this.farmAreaService.needsGatePath(golem.data(), radius)) {
+            return placeGatePath(golem, copper, onEnergy);
+        }
+
         returnUnused(golem);
         golem.data().lastActionAt(System.currentTimeMillis());
         return Phase.DONE;
@@ -127,26 +134,28 @@ public final class GolemFenceWork {
 
     public Phase takeFromChest(ActiveGolem golem, int fencesPerTrip) {
         int radius = this.chestService.effectiveRadius(golem.data());
-        Material fence = this.farmAreaService.resolveFenceMaterial(golem.data());
-        Material gate = this.farmAreaService.resolveGateMaterial(golem.data());
-        returnMaterial(golem, fence);
-        returnMaterial(golem, gate);
+        returnUnused(golem);
         if (!this.farmAreaService.needsOuterFenceWork(golem.data(), radius)) {
             golem.clearFetchFlags();
             return Phase.DONE;
         }
         List<Block> slots = this.farmAreaService.outerFenceSlots(golem.data(), radius);
         boolean needGate = this.farmAreaService.needsOuterFenceGate(golem.data(), radius);
+        Material preferredFence = this.farmAreaService.resolveFenceMaterial(golem.data());
+        Material preferredGate = this.farmAreaService.resolveGateMaterial(golem.data());
+        Material fence = this.chestService.findFenceInChest(golem.data(), preferredFence);
+        Material gate = this.chestService.findGateInChest(golem.data(), preferredGate);
         int fenceWant = 0;
-        if (!slots.isEmpty()) {
+        if (!slots.isEmpty() && fence != null) {
             fenceWant = Math.min(Math.max(1, fencesPerTrip), slots.size());
             fenceWant = Math.min(fenceWant, this.chestService.countItem(golem.data(), fence));
         }
-        boolean takeGate = slots.isEmpty()
-                && needGate
-                && this.chestService.countItem(golem.data(), gate) > 0;
+        boolean takeGate = slots.isEmpty() && needGate && gate != null;
         if (fenceWant <= 0 && !takeGate) {
             golem.clearFetchFlags();
+            if (this.farmAreaService.needsGatePath(golem.data(), radius)) {
+                return Phase.MOVING_GATE;
+            }
             return Phase.PAUSE;
         }
         if (fenceWant > 0 && this.chestService.takeItem(golem.data(), fence, fenceWant)) {
@@ -160,11 +169,11 @@ public final class GolemFenceWork {
         if (!this.farmAreaService.outerFenceObstructions(golem.data(), radius).isEmpty()) {
             return Phase.MOVING_CLEAR;
         }
-        if (!slots.isEmpty() && countCarried(golem, fence) > 0) {
+        if (!slots.isEmpty() && countCarriedFences(golem) > 0) {
             golem.targetCrop(slots.get(0).getLocation());
             return Phase.MOVING_FENCE;
         }
-        if (takeGate && countCarried(golem, gate) > 0) {
+        if (takeGate && countCarriedGates(golem) > 0) {
             return Phase.MOVING_GATE;
         }
         returnUnused(golem);
@@ -172,10 +181,8 @@ public final class GolemFenceWork {
     }
 
     public void returnUnused(ActiveGolem golem) {
-        Material fence = this.farmAreaService.resolveFenceMaterial(golem.data());
-        Material gate = this.farmAreaService.resolveGateMaterial(golem.data());
-        returnMaterial(golem, fence);
-        returnMaterial(golem, gate);
+        returnFences(golem);
+        returnGates(golem);
         golem.clearFetchFlags();
     }
 
@@ -256,7 +263,7 @@ public final class GolemFenceWork {
         golem.markDirty();
         int radius = this.chestService.effectiveRadius(golem.data());
         List<Block> left = this.farmAreaService.outerFenceSlots(golem.data(), radius);
-        if (!left.isEmpty() && countCarried(golem, fence) > 0) {
+        if (!left.isEmpty() && countCarriedFences(golem) > 0) {
             golem.targetCrop(left.get(0).getLocation());
             Location nextStand = this.farmAreaService.standOnBorderForFence(golem.data(), left.get(0));
             if (nextStand != null) {
@@ -270,6 +277,9 @@ public final class GolemFenceWork {
             return Phase.FETCH_FENCE;
         }
         if (this.farmAreaService.needsOuterFenceGate(golem.data(), radius)) {
+            return Phase.MOVING_GATE;
+        }
+        if (this.farmAreaService.needsGatePath(golem.data(), radius)) {
             return Phase.MOVING_GATE;
         }
         returnUnused(golem);
@@ -314,6 +324,38 @@ public final class GolemFenceWork {
         return Phase.DONE;
     }
 
+    private Phase placeGatePath(ActiveGolem golem, CopperGolem copper, Consumer<ActiveGolem> onEnergy) {
+        int radius = this.chestService.effectiveRadius(golem.data());
+        Block spot = this.farmAreaService.outerFenceGateSpot(golem.data(), radius);
+        if (spot == null) {
+            returnUnused(golem);
+            return Phase.DONE;
+        }
+        golem.targetCrop(spot.getLocation());
+        Location stand = this.farmAreaService.standOnBorderForFence(golem.data(), spot);
+        if (stand == null) {
+            return Phase.MOVING_GATE;
+        }
+        if (!approachStand(golem, copper, stand)) {
+            return Phase.MOVING_GATE;
+        }
+        copper.setVelocity(new Vector(0, 0, 0));
+        GolemGaze.faceBlock(golem, spot);
+        this.farmAreaService.placeGatePathUnder(golem.data(), spot, golem.data().id());
+        if (onEnergy != null) {
+            onEnergy.accept(golem);
+        }
+        Location inside = this.farmAreaService.standOnBorderForFence(golem.data(), spot);
+        if (inside != null && !blockedStand(inside)) {
+            this.movement.walkTowards(copper, inside, golem);
+        }
+        golem.targetCrop(null);
+        golem.markDirty();
+        returnUnused(golem);
+        golem.data().lastActionAt(System.currentTimeMillis());
+        return Phase.DONE;
+    }
+
     private boolean approachStand(ActiveGolem golem, CopperGolem copper, Location stand) {
         if (stand == null || blockedStand(stand)) {
             return false;
@@ -330,9 +372,6 @@ public final class GolemFenceWork {
                 && !feetInFence(copper);
     }
 
-    /**
-     * Teleport only when feet are inside a fence/gate column and the golem has not moved for ~2s.
-     */
     private boolean extractIfConfirmedStuck(ActiveGolem golem, CopperGolem copper) {
         Location at = copper.getLocation();
         if (!feetInFence(copper)) {
@@ -414,10 +453,18 @@ public final class GolemFenceWork {
         return Tag.FENCES.isTagged(feet) || Tag.FENCE_GATES.isTagged(feet);
     }
 
-    private void returnMaterial(ActiveGolem golem, Material material) {
+    private void returnFences(ActiveGolem golem) {
+        returnTagged(golem, Tag.FENCES);
+    }
+
+    private void returnGates(ActiveGolem golem) {
+        returnTagged(golem, Tag.FENCE_GATES);
+    }
+
+    private void returnTagged(ActiveGolem golem, Tag<Material> tag) {
         List<ItemStack> leftover = new ArrayList<>();
         for (ItemStack stack : golem.carried()) {
-            if (stack != null && stack.getType() == material) {
+            if (stack != null && tag.isTagged(stack.getType())) {
                 this.chestService.deposit(golem.data(), stack.clone());
             } else if (stack != null) {
                 leftover.add(stack.clone());
@@ -429,10 +476,36 @@ public final class GolemFenceWork {
         }
     }
 
-    private static int countCarried(ActiveGolem golem, Material material) {
+    private static Material firstCarriedFence(ActiveGolem golem) {
+        for (ItemStack stack : golem.carried()) {
+            if (stack != null && !stack.isEmpty() && Tag.FENCES.isTagged(stack.getType())) {
+                return stack.getType();
+            }
+        }
+        return null;
+    }
+
+    private static Material firstCarriedGate(ActiveGolem golem) {
+        for (ItemStack stack : golem.carried()) {
+            if (stack != null && !stack.isEmpty() && Tag.FENCE_GATES.isTagged(stack.getType())) {
+                return stack.getType();
+            }
+        }
+        return null;
+    }
+
+    private static int countCarriedFences(ActiveGolem golem) {
+        return countCarriedTagged(golem, Tag.FENCES);
+    }
+
+    private static int countCarriedGates(ActiveGolem golem) {
+        return countCarriedTagged(golem, Tag.FENCE_GATES);
+    }
+
+    private static int countCarriedTagged(ActiveGolem golem, Tag<Material> tag) {
         int total = 0;
         for (ItemStack stack : golem.carried()) {
-            if (stack != null && stack.getType() == material) {
+            if (stack != null && tag.isTagged(stack.getType())) {
                 total += stack.getAmount();
             }
         }

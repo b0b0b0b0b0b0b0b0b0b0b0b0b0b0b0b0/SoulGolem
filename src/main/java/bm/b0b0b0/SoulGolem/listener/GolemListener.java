@@ -167,10 +167,43 @@ public final class GolemListener implements Listener {
         return isTerritoryOwner(player, block) && FarmAreaService.isAnyCrop(block.getType());
     }
 
+    private boolean isOwnerGateBreak(Player player, Block block) {
+        return isTerritoryOwner(player, block)
+                && block != null
+                && Tag.FENCE_GATES.isTagged(block.getType());
+    }
+
     private boolean isOwnerGateUse(Player player, Block block) {
         return isTerritoryOwner(player, block)
                 && block != null
                 && Tag.FENCE_GATES.isTagged(block.getType());
+    }
+
+    private void handleOwnerGateBreak(Player player, Block block) {
+        this.farmAreaService.unprotectBlock(block);
+    }
+
+    private void handleOwnerGatePlace(Player player, Block block) {
+        if (block == null || !Tag.FENCE_GATES.isTagged(block.getType())) {
+            return;
+        }
+        for (ActiveGolem active : this.registry.all()) {
+            if (!player.getUniqueId().equals(active.data().ownerUuid())) {
+                continue;
+            }
+            int radius = this.chestService.effectiveRadius(active.data());
+            Block gateSpot = this.farmAreaService.outerFenceGateSpot(active.data(), radius);
+            if (gateSpot == null
+                    || gateSpot.getX() != block.getX()
+                    || gateSpot.getY() != block.getY()
+                    || gateSpot.getZ() != block.getZ()
+                    || gateSpot.getWorld() == null
+                    || !gateSpot.getWorld().equals(block.getWorld())) {
+                continue;
+            }
+            this.farmAreaService.protectOwnedBlock(block, active.data().id());
+            return;
+        }
     }
 
     private boolean isAllowedStationUse(Player player, Block block) {
@@ -240,6 +273,10 @@ public final class GolemListener implements Listener {
         if (canBypassTerritory(player) || isOwnerCropBreak(player, block)) {
             return;
         }
+        if (isOwnerGateBreak(player, block)) {
+            handleOwnerGateBreak(player, block);
+            return;
+        }
         event.setCancelled(true);
         messages().send(player, "protect-work-block");
     }
@@ -247,7 +284,37 @@ public final class GolemListener implements Listener {
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onProtectedPlace(BlockPlaceEvent event) {
         Block block = event.getBlockPlaced();
+        Player player = event.getPlayer();
+        handleOwnerGatePlace(player, block);
         if (!isTerritory(block)) {
+            return;
+        }
+        if (canBypassTerritory(player)) {
+            return;
+        }
+        if (Tag.FENCE_GATES.isTagged(block.getType()) && isTerritoryOwner(player, block)) {
+            return;
+        }
+        event.setCancelled(true);
+        messages().send(player, "protect-work-block");
+    }
+
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onSoulCraftOpen(PlayerInteractEvent event) {
+        if (event.getHand() != EquipmentSlot.HAND) {
+            return;
+        }
+        if (event.getAction() != Action.RIGHT_CLICK_BLOCK) {
+            return;
+        }
+        Block block = event.getClickedBlock();
+        if (block == null || block.getType() != Material.CRAFTING_TABLE) {
+            return;
+        }
+        if (!this.configurationLoader.config().settings().farmer.denyCraftOpen) {
+            return;
+        }
+        if (!this.chestService.isSoulCraftingTable(block) && !isRegisteredCraftTable(block)) {
             return;
         }
         Player player = event.getPlayer();
@@ -255,7 +322,7 @@ public final class GolemListener implements Listener {
             return;
         }
         event.setCancelled(true);
-        messages().send(player, "protect-work-block");
+        messages().send(player, "protect-craft-denied");
     }
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
@@ -278,9 +345,15 @@ public final class GolemListener implements Listener {
             return;
         }
         if (event.getAction() == Action.RIGHT_CLICK_BLOCK && isAllowedStationUse(player, block)) {
+            if (this.chestService.isSoulChest(block)) {
+                this.chestService.ensureChestWaxed(block);
+            }
             return;
         }
         if (event.getAction() == Action.LEFT_CLICK_BLOCK && isOwnerCropBreak(player, block)) {
+            return;
+        }
+        if (event.getAction() == Action.LEFT_CLICK_BLOCK && isOwnerGateBreak(player, block)) {
             return;
         }
         if (event.getAction() == Action.RIGHT_CLICK_BLOCK && isOwnerGateUse(player, block)) {
@@ -326,6 +399,18 @@ public final class GolemListener implements Listener {
         event.blockList().removeIf(this::isTerritory);
     }
 
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onSoulChestFade(org.bukkit.event.block.BlockFadeEvent event) {
+        Block block = event.getBlock();
+        if (!SoulChestService.isChestLike(block.getType())) {
+            return;
+        }
+        if (this.chestService.isSoulChest(block)) {
+            event.setCancelled(true);
+            this.chestService.ensureChestWaxed(block);
+        }
+    }
+
     private UUID stationGolemId(Block block) {
         UUID fromChest = this.chestService.golemIdFromChest(block);
         if (fromChest != null) {
@@ -338,6 +423,17 @@ public final class GolemListener implements Listener {
             }
             for (ActiveGolem golem : this.registry.all()) {
                 if (this.chestService.isSoulCraftingTable(block, golem.data())) {
+                    return golem.data().id();
+                }
+            }
+        }
+        if (this.chestService.isSoulComposter(block) || isRegisteredComposter(block)) {
+            UUID fromCompost = this.chestService.golemIdFromCompost(block);
+            if (fromCompost != null) {
+                return fromCompost;
+            }
+            for (ActiveGolem golem : this.registry.all()) {
+                if (this.chestService.isSoulComposter(block, golem.data())) {
                     return golem.data().id();
                 }
             }
@@ -357,6 +453,18 @@ public final class GolemListener implements Listener {
         return false;
     }
 
+    private boolean isRegisteredComposter(Block block) {
+        if (block.getType() != Material.COMPOSTER) {
+            return false;
+        }
+        for (ActiveGolem golem : this.registry.all()) {
+            if (this.chestService.isSoulComposter(block, golem.data())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onHopperMove(InventoryMoveItemEvent event) {
         if (isSoulInventory(event.getSource().getLocation()) || isSoulInventory(event.getDestination().getLocation())) {
@@ -369,7 +477,9 @@ public final class GolemListener implements Listener {
             return false;
         }
         Block block = location.getBlock();
-        return this.chestService.isSoulChest(block) || isRegisteredCraftTable(block);
+        return this.chestService.isSoulChest(block)
+                || isRegisteredCraftTable(block)
+                || isRegisteredComposter(block);
     }
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)

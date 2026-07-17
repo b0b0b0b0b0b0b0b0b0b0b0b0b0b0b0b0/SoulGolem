@@ -131,6 +131,22 @@ public final class FarmerCarried {
         }
     }
 
+    public void returnAllCarriedToChest(ActiveGolem golem) {
+        List<ItemStack> leftover = new ArrayList<>();
+        for (ItemStack stack : golem.carried()) {
+            if (stack == null || stack.getType().isAir()) {
+                continue;
+            }
+            if (!this.ctx.chestService().deposit(golem.data(), stack.clone())) {
+                leftover.add(stack.clone());
+            }
+        }
+        golem.clearCarried();
+        for (ItemStack stack : leftover) {
+            golem.carry(stack);
+        }
+    }
+
     public static Material carriedStairs(ActiveGolem golem) {
         for (ItemStack stack : golem.carried()) {
             if (stack != null && org.bukkit.Tag.STAIRS.isTagged(stack.getType())) {

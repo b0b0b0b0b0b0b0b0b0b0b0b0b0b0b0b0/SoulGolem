@@ -80,6 +80,9 @@ public final class DatabaseManager {
                         seat_x DOUBLE NOT NULL DEFAULT -1,
                         seat_y DOUBLE NOT NULL DEFAULT -1,
                         seat_z DOUBLE NOT NULL DEFAULT -1,
+                        compost_x DOUBLE NOT NULL DEFAULT -1,
+                        compost_y DOUBLE NOT NULL DEFAULT -1,
+                        compost_z DOUBLE NOT NULL DEFAULT -1,
                         entity_uuid VARCHAR(36),
                         level INT NOT NULL,
                         energy INT NOT NULL,
@@ -101,6 +104,9 @@ public final class DatabaseManager {
             addColumnIgnoreError(statement, "ALTER TABLE soul_golems ADD COLUMN seat_x DOUBLE NOT NULL DEFAULT -1");
             addColumnIgnoreError(statement, "ALTER TABLE soul_golems ADD COLUMN seat_y DOUBLE NOT NULL DEFAULT -1");
             addColumnIgnoreError(statement, "ALTER TABLE soul_golems ADD COLUMN seat_z DOUBLE NOT NULL DEFAULT -1");
+            addColumnIgnoreError(statement, "ALTER TABLE soul_golems ADD COLUMN compost_x DOUBLE NOT NULL DEFAULT -1");
+            addColumnIgnoreError(statement, "ALTER TABLE soul_golems ADD COLUMN compost_y DOUBLE NOT NULL DEFAULT -1");
+            addColumnIgnoreError(statement, "ALTER TABLE soul_golems ADD COLUMN compost_z DOUBLE NOT NULL DEFAULT -1");
         } catch (SQLException exception) {
             throw new IllegalStateException("Failed to migrate SoulGolem database", exception);
         }

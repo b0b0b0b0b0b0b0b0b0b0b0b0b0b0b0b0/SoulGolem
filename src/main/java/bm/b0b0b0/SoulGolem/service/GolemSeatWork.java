@@ -80,25 +80,15 @@ public final class GolemSeatWork {
 
     public Phase sitOnBench(ActiveGolem golem, CopperGolem copper) {
         if (!this.farmAreaService.hasValidSeat(golem.data())) {
-            this.farmAreaService.debugSeat(golem.data().id() + " sit UNAVAILABLE no seat");
             return Phase.UNAVAILABLE;
         }
         Location seatStand = this.farmAreaService.seatStandLocation(golem.data());
         if (seatStand == null) {
-            this.farmAreaService.debugSeat(golem.data().id() + " sit UNAVAILABLE null stand");
             return Phase.UNAVAILABLE;
         }
         Block seatBlock = this.farmAreaService.seatBlock(golem.data());
         Location from = copper.getLocation();
         double distSq = GolemMovement.horizontalDistanceSquared(from, seatStand);
-        this.farmAreaService.debugSeat(String.format(
-                "%s sit from=%.2f,%.2f,%.2f seat=%.2f,%.2f,%.2f distSq=%.3f block=%s",
-                golem.data().id(),
-                from.getX(), from.getY(), from.getZ(),
-                seatStand.getX(), seatStand.getY(), seatStand.getZ(),
-                distSq,
-                seatBlock != null ? seatBlock.getType() : "?"
-        ));
 
         if (distSq > 2.25D) {
             Location approach = seatBlock != null
@@ -108,11 +98,6 @@ public final class GolemSeatWork {
                 approach = seatStand.clone();
                 approach.setY(Math.floor(golem.data().homeY()) + 1.0D);
             }
-            this.farmAreaService.debugSeat(String.format(
-                    "%s MOVING approach=%.2f,%.2f,%.2f",
-                    golem.data().id(),
-                    approach.getX(), approach.getY(), approach.getZ()
-            ));
             copper.setGravity(true);
             copper.setCollidable(true);
             this.movement.walkTowards(copper, approach, golem);
@@ -156,11 +141,6 @@ public final class GolemSeatWork {
         }
         this.farmAreaService.reprotectSeat(golem.data());
         GolemAiMode.enable(plugin, copper, registry, keys);
-        this.farmAreaService.debugSeat(golem.data().id() + " LEAVE beside="
-                + (beside != null
-                ? String.format("%.2f,%.2f,%.2f", beside.getX(), beside.getY(), beside.getZ())
-                : "null")
-                + " seatOk=" + this.farmAreaService.hasValidSeat(golem.data()));
     }
 
     private void parkOnSeat(ActiveGolem golem, CopperGolem copper, Location seatStand) {
@@ -171,20 +151,7 @@ public final class GolemSeatWork {
             sit.setYaw(GolemMovement.yawTo(sit, yawTarget));
         }
         sit.setPitch(0.0F);
-        Location before = copper.getLocation().clone();
-        boolean ok = GolemTeleport.park(copper, sit);
-        Location after = copper.getLocation();
-        this.farmAreaService.debugSeat(String.format(
-                "%s PARK ok=%s before=%.2f,%.2f,%.2f target=%.2f,%.2f,%.2f after=%.2f,%.2f,%.2f gravity=%s nophys=%s pass=%d",
-                golem.data().id(),
-                ok,
-                before.getX(), before.getY(), before.getZ(),
-                sit.getX(), sit.getY(), sit.getZ(),
-                after.getX(), after.getY(), after.getZ(),
-                copper.hasGravity(),
-                copper.hasNoPhysics(),
-                copper.getPassengers().size()
-        ));
+        GolemTeleport.park(copper, sit);
         GolemGaze.faceSitAudience(golem, copper);
         GolemGazeService.forceLook(copper, golem);
         golem.data().lastActionAt(System.currentTimeMillis());
@@ -201,17 +168,7 @@ public final class GolemSeatWork {
         Location sit = seatStand.clone();
         sit.setYaw(at.getYaw());
         sit.setPitch(0.0F);
-        Location before = at.clone();
-        boolean ok = GolemTeleport.park(copper, sit);
-        this.farmAreaService.debugSeat(String.format(
-                "%s SNAP ok=%s before=%.2f,%.2f,%.2f target=%.2f,%.2f,%.2f after=%.2f,%.2f,%.2f distSq=%.3f",
-                golem.data().id(),
-                ok,
-                before.getX(), before.getY(), before.getZ(),
-                sit.getX(), sit.getY(), sit.getZ(),
-                copper.getLocation().getX(), copper.getLocation().getY(), copper.getLocation().getZ(),
-                distSq
-        ));
+        GolemTeleport.park(copper, sit);
     }
 
     public static Material carriedStairs(ActiveGolem golem) {

@@ -19,8 +19,9 @@ public final class SqlGolemRepository implements GolemRepository {
             INSERT INTO soul_golems (
                 id, owner_uuid, type, world, x, y, z, home_x, home_y, home_z, yaw, pitch,
                 chest_x, chest_y, chest_z, craft_x, craft_y, craft_z, seat_x, seat_y, seat_z,
+                compost_x, compost_y, compost_z,
                 entity_uuid, level, energy, paused, blocks_mined, upgrades_json, last_action_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 owner_uuid = excluded.owner_uuid,
                 type = excluded.type,
@@ -42,6 +43,9 @@ public final class SqlGolemRepository implements GolemRepository {
                 seat_x = excluded.seat_x,
                 seat_y = excluded.seat_y,
                 seat_z = excluded.seat_z,
+                compost_x = excluded.compost_x,
+                compost_y = excluded.compost_y,
+                compost_z = excluded.compost_z,
                 entity_uuid = excluded.entity_uuid,
                 level = excluded.level,
                 energy = excluded.energy,
@@ -55,8 +59,9 @@ public final class SqlGolemRepository implements GolemRepository {
             INSERT INTO soul_golems (
                 id, owner_uuid, type, world, x, y, z, home_x, home_y, home_z, yaw, pitch,
                 chest_x, chest_y, chest_z, craft_x, craft_y, craft_z, seat_x, seat_y, seat_z,
+                compost_x, compost_y, compost_z,
                 entity_uuid, level, energy, paused, blocks_mined, upgrades_json, last_action_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON DUPLICATE KEY UPDATE
                 owner_uuid = VALUES(owner_uuid),
                 type = VALUES(type),
@@ -78,6 +83,9 @@ public final class SqlGolemRepository implements GolemRepository {
                 seat_x = VALUES(seat_x),
                 seat_y = VALUES(seat_y),
                 seat_z = VALUES(seat_z),
+                compost_x = VALUES(compost_x),
+                compost_y = VALUES(compost_y),
+                compost_z = VALUES(compost_z),
                 entity_uuid = VALUES(entity_uuid),
                 level = VALUES(level),
                 energy = VALUES(energy),
@@ -217,13 +225,16 @@ public final class SqlGolemRepository implements GolemRepository {
         statement.setDouble(19, data.seatX());
         statement.setDouble(20, data.seatY());
         statement.setDouble(21, data.seatZ());
-        statement.setString(22, data.entityUuid() == null ? null : data.entityUuid().toString());
-        statement.setInt(23, data.level());
-        statement.setInt(24, data.energy());
-        statement.setInt(25, data.paused() ? 1 : 0);
-        statement.setLong(26, data.blocksMined());
-        statement.setString(27, data.upgradesJson());
-        statement.setLong(28, data.lastActionAt());
+        statement.setDouble(22, data.compostX());
+        statement.setDouble(23, data.compostY());
+        statement.setDouble(24, data.compostZ());
+        statement.setString(25, data.entityUuid() == null ? null : data.entityUuid().toString());
+        statement.setInt(26, data.level());
+        statement.setInt(27, data.energy());
+        statement.setInt(28, data.paused() ? 1 : 0);
+        statement.setLong(29, data.blocksMined());
+        statement.setString(30, data.upgradesJson());
+        statement.setLong(31, data.lastActionAt());
     }
 
     private static SoulGolemData map(ResultSet resultSet) throws SQLException {
@@ -251,6 +262,15 @@ public final class SqlGolemRepository implements GolemRepository {
             data.seatPosition(resultSet.getDouble("seat_x"), resultSet.getDouble("seat_y"), resultSet.getDouble("seat_z"));
         } catch (SQLException ignored) {
             data.clearSeatPosition();
+        }
+        try {
+            data.compostPosition(
+                    resultSet.getDouble("compost_x"),
+                    resultSet.getDouble("compost_y"),
+                    resultSet.getDouble("compost_z")
+            );
+        } catch (SQLException ignored) {
+            data.clearCompostPosition();
         }
         String entity = resultSet.getString("entity_uuid");
         if (entity != null && !entity.isEmpty()) {

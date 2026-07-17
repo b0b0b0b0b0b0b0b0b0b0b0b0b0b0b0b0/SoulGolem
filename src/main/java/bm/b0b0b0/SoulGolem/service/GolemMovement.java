@@ -219,7 +219,7 @@ public final class GolemMovement {
         if (!type.isSolid()) {
             return false;
         }
-        if (SoulChestService.isChestLike(type) || type == Material.CRAFTING_TABLE || type == Material.WHEAT) {
+        if (SoulChestService.isChestLike(type) || type == Material.CRAFTING_TABLE || type == Material.COMPOSTER || type == Material.WHEAT) {
             return false;
         }
         if (FarmAreaService.isVegetation(type)) {
@@ -392,22 +392,41 @@ public final class GolemMovement {
         if (crossesColumn(from, target, Math.floor(data.chestX()) + 0.5D, Math.floor(data.chestZ()) + 0.5D, 0.85D)) {
             return true;
         }
-        if (!data.hasCraftStation()) {
-            return false;
+        if (data.hasCraftStation()
+                && crossesColumn(from, target, Math.floor(data.craftX()) + 0.5D, Math.floor(data.craftZ()) + 0.5D, 0.85D)) {
+            return true;
         }
-        return crossesColumn(from, target, Math.floor(data.craftX()) + 0.5D, Math.floor(data.craftZ()) + 0.5D, 0.85D);
+        return data.hasCompostStation()
+                && crossesColumn(
+                from,
+                target,
+                Math.floor(data.compostX()) + 0.5D,
+                Math.floor(data.compostZ()) + 0.5D,
+                0.85D
+        );
     }
 
     private Location sidestepAroundStation(Location from, Location target, SoulGolemData data) {
         double cx = Math.floor(data.chestX()) + 0.5D;
         double cz = Math.floor(data.chestZ()) + 0.5D;
+        double bestDist = horizontalDistanceSquared(from, new Location(from.getWorld(), cx, from.getY(), cz));
         if (data.hasCraftStation()) {
             double fx = Math.floor(data.craftX()) + 0.5D;
             double fz = Math.floor(data.craftZ()) + 0.5D;
-            if (horizontalDistanceSquared(from, new Location(from.getWorld(), fx, from.getY(), fz))
-                    < horizontalDistanceSquared(from, new Location(from.getWorld(), cx, from.getY(), cz))) {
+            double dist = horizontalDistanceSquared(from, new Location(from.getWorld(), fx, from.getY(), fz));
+            if (dist < bestDist) {
+                bestDist = dist;
                 cx = fx;
                 cz = fz;
+            }
+        }
+        if (data.hasCompostStation()) {
+            double px = Math.floor(data.compostX()) + 0.5D;
+            double pz = Math.floor(data.compostZ()) + 0.5D;
+            double dist = horizontalDistanceSquared(from, new Location(from.getWorld(), px, from.getY(), pz));
+            if (dist < bestDist) {
+                cx = px;
+                cz = pz;
             }
         }
         Vector fromHazard = new Vector(from.getX() - cx, 0.0D, from.getZ() - cz);

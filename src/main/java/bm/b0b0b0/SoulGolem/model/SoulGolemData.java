@@ -25,6 +25,9 @@ public final class SoulGolemData {
     private double seatX = -1.0D;
     private double seatY = -1.0D;
     private double seatZ = -1.0D;
+    private double compostX = -1.0D;
+    private double compostY = -1.0D;
+    private double compostZ = -1.0D;
     private UUID entityUuid;
     private int level;
     private int energy;
@@ -193,6 +196,34 @@ public final class SoulGolemData {
         this.seatX = -1.0D;
         this.seatY = -1.0D;
         this.seatZ = -1.0D;
+    }
+
+    public boolean hasCompostStation() {
+        return this.compostX != -1.0D || this.compostY != -1.0D || this.compostZ != -1.0D;
+    }
+
+    public double compostX() {
+        return this.compostX;
+    }
+
+    public double compostY() {
+        return this.compostY;
+    }
+
+    public double compostZ() {
+        return this.compostZ;
+    }
+
+    public void compostPosition(double x, double y, double z) {
+        this.compostX = x;
+        this.compostY = y;
+        this.compostZ = z;
+    }
+
+    public void clearCompostPosition() {
+        this.compostX = -1.0D;
+        this.compostY = -1.0D;
+        this.compostZ = -1.0D;
     }
 
     public UUID entityUuid() {

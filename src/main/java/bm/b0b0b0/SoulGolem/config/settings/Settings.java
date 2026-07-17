@@ -23,11 +23,6 @@ public final class Settings extends YamlSerializable {
     })
     public String language = "ru";
 
-    @Comment({
-            @CommentValue("Log seat approach/teleport to console (sit debug)")
-    })
-    public boolean debugSeat = true;
-
     @NewLine
     @Comment({
             @CommentValue("Maximum active golems per player (permission overrides possible later)")
@@ -121,6 +116,12 @@ public final class Settings extends YamlSerializable {
             @CommentValue("Blocks where a statue can be placed to spawn a golem")
     })
     public List<String> placementBlocks = defaultPlacement();
+
+    @NewLine
+    @Comment({
+            @CommentValue("Crafting table recipes for Soul statues (like a chest: copper ring + center item)")
+    })
+    public Crafting crafting = new Crafting();
 
     @Comment({
             @CommentValue("Blocks that can be turned into resource ores")
@@ -249,6 +250,71 @@ public final class Settings extends YamlSerializable {
                 @CommentValue("Extra damage when using an axe")
         })
         public double axeBonus = 1.0D;
+    }
+
+    public static final class Crafting {
+        @Comment({
+                @CommentValue("Master switch for statue crafting recipes")
+        })
+        public boolean enabled = true;
+
+        @Comment({
+                @CommentValue("Soul Farmer statue recipe")
+        })
+        public StatueCraft farmer = StatueCraft.farmerDefault();
+
+        @Comment({
+                @CommentValue("Soul Miner statue recipe")
+        })
+        public StatueCraft miner = StatueCraft.minerDefault();
+    }
+
+    public static final class StatueCraft {
+        @Comment({
+                @CommentValue("Enable this statue recipe")
+        })
+        public boolean enabled = true;
+
+        @Comment({
+                @CommentValue("Shaped recipe rows (max 3), like a chest ring")
+        })
+        public List<String> shape = new ArrayList<>();
+
+        @Comment({
+                @CommentValue("Ingredient keys as CHAR=MATERIAL (e.g. C=COPPER_INGOT)")
+        })
+        public List<String> ingredients = new ArrayList<>();
+
+        public static StatueCraft farmerDefault() {
+            StatueCraft craft = new StatueCraft();
+            craft.enabled = true;
+            craft.shape = defaultRingShape();
+            craft.ingredients = defaultIngredients("WHEAT_SEEDS");
+            return craft;
+        }
+
+        public static StatueCraft minerDefault() {
+            StatueCraft craft = new StatueCraft();
+            craft.enabled = true;
+            craft.shape = defaultRingShape();
+            craft.ingredients = defaultIngredients("COAL");
+            return craft;
+        }
+
+        private static List<String> defaultRingShape() {
+            List<String> shape = new ArrayList<>(3);
+            shape.add("CCC");
+            shape.add("CSC");
+            shape.add("CCC");
+            return shape;
+        }
+
+        private static List<String> defaultIngredients(String center) {
+            List<String> list = new ArrayList<>(2);
+            list.add("C=COPPER_INGOT");
+            list.add("S=" + center);
+            return list;
+        }
     }
 
     public static final class OreWeight {
@@ -396,9 +462,14 @@ public final class Settings extends YamlSerializable {
 
     public static final class Farmer {
         @Comment({
-                @CommentValue("Craft bread at crafting table when chest has 3+ wheat")
+                @CommentValue("Bake bread when a crafting table is placed (put CRAFTING_TABLE in chest; golem places it near the chest)")
         })
         public boolean craftBread = true;
+
+        @Comment({
+                @CommentValue("If true, nobody (including owner) can open the golem crafting table; only admin Creative+Shift bypasses")
+        })
+        public boolean denyCraftOpen = true;
 
         @Comment({
                 @CommentValue("Wander the farm while waiting for crops")
@@ -411,7 +482,7 @@ public final class Settings extends YamlSerializable {
         public boolean collectGroundLoot = true;
 
         @Comment({
-                @CommentValue("Use bone meal from chest on immature wheat (vanilla applyBoneMeal)")
+                @CommentValue("Use bone meal from chest on immature crops (stems only until fully grown)")
         })
         public boolean useBoneMeal = true;
 
@@ -419,6 +490,36 @@ public final class Settings extends YamlSerializable {
                 @CommentValue("How many bone meal to take per fertilize trip")
         })
         public int boneMealPerTrip = 3;
+
+        @Comment({
+                @CommentValue("Place COMPOSTER from chest next to the crafting table; compost excess seeds/crops into bone meal")
+        })
+        public boolean useComposter = true;
+
+        @Comment({
+                @CommentValue("Minimum seeds of each type to keep in chest (not composted)")
+        })
+        public int compostSeedReserve = 16;
+
+        @Comment({
+                @CommentValue("If bone meal in chest+hands is below this and crops need fertilizing, also compost harvest products")
+        })
+        public int compostWhenBoneMealBelow = 3;
+
+        @Comment({
+                @CommentValue("Minimum harvest items of each type to keep when composting crops")
+        })
+        public int compostCropKeep = 64;
+
+        @Comment({
+                @CommentValue("How many compostable items to take per compost trip")
+        })
+        public int compostItemsPerTrip = 8;
+
+        @Comment({
+                @CommentValue("Ticks to wait after crops become ripe (or after bone meal) before harvesting — so pumpkin/melon are visible. 40 ≈ 2s, 0 = instant")
+        })
+        public long harvestNoticeTicks = 40L;
 
         @Comment({
                 @CommentValue("How many seeds to take per planting trip")
@@ -461,14 +562,24 @@ public final class Settings extends YamlSerializable {
         public boolean placeFence = true;
 
         @Comment({
-                @CommentValue("Fence material for the outer ring")
+                @CommentValue("Preferred fence if several types are in the chest; any fence from Tag.FENCES works")
         })
         public String fenceMaterial = "OAK_FENCE";
 
         @Comment({
-                @CommentValue("Fence gate material (placed opposite the chest)")
+                @CommentValue("Preferred fence gate if several types are in the chest; any Tag.FENCE_GATES works")
         })
         public String gateMaterial = "OAK_FENCE_GATE";
+
+        @Comment({
+                @CommentValue("Place a free path block under the outer fence gate")
+        })
+        public boolean placeGatePath = true;
+
+        @Comment({
+                @CommentValue("Block under the gate (e.g. DIRT_PATH)")
+        })
+        public String gatePathMaterial = "DIRT_PATH";
 
         @Comment({
                 @CommentValue("How many fence posts to take/place per trip")
@@ -544,14 +655,24 @@ public final class Settings extends YamlSerializable {
         public boolean placeFence = true;
 
         @Comment({
-                @CommentValue("Fence material for the outer ring")
+                @CommentValue("Preferred fence if several types are in the chest; any fence from Tag.FENCES works")
         })
         public String fenceMaterial = "OAK_FENCE";
 
         @Comment({
-                @CommentValue("Fence gate material (placed opposite the chest)")
+                @CommentValue("Preferred fence gate if several types are in the chest; any Tag.FENCE_GATES works")
         })
         public String gateMaterial = "OAK_FENCE_GATE";
+
+        @Comment({
+                @CommentValue("Place a free path block under the outer fence gate")
+        })
+        public boolean placeGatePath = true;
+
+        @Comment({
+                @CommentValue("Block under the gate (e.g. DIRT_PATH)")
+        })
+        public String gatePathMaterial = "DIRT_PATH";
 
         @Comment({
                 @CommentValue("How many fence posts to take/place per trip")

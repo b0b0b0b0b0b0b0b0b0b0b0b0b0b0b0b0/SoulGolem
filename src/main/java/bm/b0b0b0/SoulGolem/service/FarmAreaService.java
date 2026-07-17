@@ -53,7 +53,7 @@ public final class FarmAreaService {
         int homeY = (int) Math.floor(data.homeY());
         int homeZ = (int) Math.floor(data.homeZ());
         Block water = world.getBlockAt(homeX, homeY, homeZ);
-        if (this.chestService.isChestColumn(data, water) || water.getType() == Material.CRAFTING_TABLE) {
+        if (this.chestService.isChestColumn(data, water) || water.getType() == Material.CRAFTING_TABLE || water.getType() == Material.COMPOSTER) {
             return;
         }
         Block above = water.getRelative(BlockFace.UP);
@@ -83,7 +83,8 @@ public final class FarmAreaService {
                 if (this.chestService.isChestColumn(data, soil)) {
                     continue;
                 }
-                if (soil.getType() == Material.CRAFTING_TABLE || SoulChestService.isChestLike(soil.getType())) {
+                if (soil.getType() == Material.CRAFTING_TABLE || soil.getType() == Material.COMPOSTER
+                        || SoulChestService.isChestLike(soil.getType())) {
                     continue;
                 }
                 if (isBorderWool(soil.getType())) {
@@ -202,7 +203,8 @@ public final class FarmAreaService {
                 if (this.chestService.isChestColumn(data, soil)) {
                     continue;
                 }
-                if (soil.getType() == Material.CRAFTING_TABLE || SoulChestService.isChestLike(soil.getType())) {
+                if (soil.getType() == Material.CRAFTING_TABLE || soil.getType() == Material.COMPOSTER
+                        || SoulChestService.isChestLike(soil.getType())) {
                     continue;
                 }
                 if (isBorderWool(soil.getType())) {
@@ -344,7 +346,7 @@ public final class FarmAreaService {
             if (above.getType().isAir()) {
                 continue;
             }
-            if (!setup && (SoulChestService.isChestLike(above.getType()) || above.getType() == Material.CRAFTING_TABLE)) {
+            if (!setup && (SoulChestService.isChestLike(above.getType()) || above.getType() == Material.CRAFTING_TABLE || above.getType() == Material.COMPOSTER)) {
                 continue;
             }
             if (isClearableObstruction(above, data)) {
@@ -360,7 +362,7 @@ public final class FarmAreaService {
         if (type.isAir() || type == Material.WATER || type == Material.LAVA) {
             return false;
         }
-        if (SoulChestService.isChestLike(type) || type == Material.CRAFTING_TABLE || type == Material.FURNACE
+        if (SoulChestService.isChestLike(type) || type == Material.CRAFTING_TABLE || type == Material.COMPOSTER || type == Material.FURNACE
                 || type == Material.BLAST_FURNACE || type == Material.SMOKER) {
             return false;
         }
@@ -441,27 +443,12 @@ public final class FarmAreaService {
         if (empty.isEmpty() || cropType == null) {
             return empty;
         }
-        boolean stemsEnabled = false;
-        Collection<CropType> enabled = this.configurationLoader.config().settings().enabledCrops();
-        for (CropType type : enabled) {
-            if (type.isStemCrop()) {
-                stemsEnabled = true;
-                break;
-            }
+        if (!cropType.isStemCrop()) {
+            return empty;
         }
         List<Block> result = new ArrayList<>();
         for (Block soil : empty) {
-            if (cropType.isStemCrop()) {
-                if (!isStemLattice(soil.getX(), soil.getZ()) || !hasFruitPad(soil)) {
-                    continue;
-                }
-                result.add(soil);
-                continue;
-            }
-            if (stemsEnabled && isStemLattice(soil.getX(), soil.getZ())) {
-                continue;
-            }
-            if (isFruitPadNextToStem(soil)) {
+            if (!isStemLattice(soil.getX(), soil.getZ()) || !hasFruitPad(soil)) {
                 continue;
             }
             result.add(soil);
@@ -481,20 +468,6 @@ public final class FarmAreaService {
             }
             Block above = pad.getRelative(BlockFace.UP);
             if (above.getType().isAir() || isVegetation(above.getType())) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private boolean isFruitPadNextToStem(Block soil) {
-        for (BlockFace face : new BlockFace[]{BlockFace.NORTH, BlockFace.SOUTH, BlockFace.EAST, BlockFace.WEST}) {
-            Block neighbor = soil.getRelative(face).getRelative(BlockFace.UP);
-            Material type = neighbor.getType();
-            if (type == Material.PUMPKIN_STEM
-                    || type == Material.MELON_STEM
-                    || type == Material.ATTACHED_PUMPKIN_STEM
-                    || type == Material.ATTACHED_MELON_STEM) {
                 return true;
             }
         }
@@ -644,6 +617,10 @@ public final class FarmAreaService {
             }
         }
         return list;
+    }
+
+    public List<Block> boneMealCrops(SoulGolemData data, int radius, Collection<CropType> crops) {
+        return immatureCrops(data, radius, crops);
     }
 
     public boolean hasFieldCrops(SoulGolemData data, int radius, Collection<CropType> crops) {
@@ -804,7 +781,7 @@ public final class FarmAreaService {
             Material groundType = ground.getType();
             if (!groundType.isSolid()
                     || SoulChestService.isChestLike(groundType)
-                    || groundType == Material.CRAFTING_TABLE
+                    || groundType == Material.CRAFTING_TABLE || groundType == Material.COMPOSTER
                     || Tag.STAIRS.isTagged(groundType)) {
                 continue;
             }
@@ -855,18 +832,58 @@ public final class FarmAreaService {
         return gate != null && gate.isBlock() ? gate : Material.OAK_FENCE_GATE;
     }
 
+    public boolean isGatePathEnabled(SoulGolemData data) {
+        if (data != null && data.type() == GolemType.MINER) {
+            return settings().miner.placeGatePath;
+        }
+        return settings().farmer.placeGatePath;
+    }
+
+    public Material resolveGatePathMaterial(SoulGolemData data) {
+        String raw = data != null && data.type() == GolemType.MINER
+                ? settings().miner.gatePathMaterial
+                : settings().farmer.gatePathMaterial;
+        Material path = Material.matchMaterial(raw);
+        return path != null && path.isBlock() ? path : Material.DIRT_PATH;
+    }
+
+    public Block gatePathSpot(SoulGolemData data, int radius) {
+        Block gate = outerFenceGateSpot(data, radius);
+        return gate == null ? null : gate.getRelative(BlockFace.DOWN);
+    }
+
+    public boolean needsGatePath(SoulGolemData data, int radius) {
+        if (!isGatePathEnabled(data) || needsOuterFenceGate(data, radius)) {
+            return false;
+        }
+        Block under = gatePathSpot(data, radius);
+        if (under == null) {
+            return false;
+        }
+        Material path = resolveGatePathMaterial(data);
+        if (under.getType() == path) {
+            return false;
+        }
+        if (SoulChestService.isChestLike(under.getType()) || under.getType() == Material.CRAFTING_TABLE || under.getType() == Material.COMPOSTER) {
+            return false;
+        }
+        return true;
+    }
+
     public boolean needsOuterFenceWork(SoulGolemData data, int radius) {
-        return !outerFenceSlots(data, radius).isEmpty() || needsOuterFenceGate(data, radius);
+        return !outerFenceSlots(data, radius).isEmpty()
+                || needsOuterFenceGate(data, radius)
+                || needsGatePath(data, radius);
     }
 
     public boolean canProgressOuterFence(SoulGolemData data, int radius, int carriedFence, int carriedGate) {
         if (!outerFenceSlots(data, radius).isEmpty()) {
-            return carriedFence > 0 || this.chestService.countItem(data, resolveFenceMaterial(data)) > 0;
+            return carriedFence > 0 || this.chestService.countFencesInChest(data) > 0;
         }
         if (needsOuterFenceGate(data, radius)) {
-            return carriedGate > 0 || this.chestService.countItem(data, resolveGateMaterial(data)) > 0;
+            return carriedGate > 0 || this.chestService.countGatesInChest(data) > 0;
         }
-        return false;
+        return needsGatePath(data, radius);
     }
 
     public boolean needsOuterFenceGate(SoulGolemData data, int radius) {
@@ -933,7 +950,7 @@ public final class FarmAreaService {
         if (type == fence || Tag.FENCES.isTagged(type) || type == gate || Tag.FENCE_GATES.isTagged(type)) {
             return;
         }
-        if (SoulChestService.isChestLike(type) || type == Material.CRAFTING_TABLE) {
+        if (SoulChestService.isChestLike(type) || type == Material.CRAFTING_TABLE || type == Material.COMPOSTER) {
             return;
         }
         list.add(block);
@@ -1117,7 +1134,7 @@ public final class FarmAreaService {
         if (!ground.getType().isSolid() && ground.getType() != Material.FARMLAND) {
             return null;
         }
-        if (SoulChestService.isChestLike(ground.getType()) || ground.getType() == Material.CRAFTING_TABLE) {
+        if (SoulChestService.isChestLike(ground.getType()) || ground.getType() == Material.CRAFTING_TABLE || ground.getType() == Material.COMPOSTER) {
             return null;
         }
         Block feet = ground.getRelative(BlockFace.UP);
@@ -1152,10 +1169,10 @@ public final class FarmAreaService {
                 && !Tag.FENCES.isTagged(aboveType)
                 && !Tag.FENCE_GATES.isTagged(aboveType)
                 && !SoulChestService.isChestLike(aboveType)
-                && aboveType != Material.CRAFTING_TABLE))) {
+                && aboveType != Material.CRAFTING_TABLE && aboveType != Material.COMPOSTER))) {
             above.setType(Material.AIR, false);
         }
-        if (SoulChestService.isChestLike(spot.getType()) || spot.getType() == Material.CRAFTING_TABLE) {
+        if (SoulChestService.isChestLike(spot.getType()) || spot.getType() == Material.CRAFTING_TABLE || spot.getType() == Material.COMPOSTER) {
             return;
         }
         if (Tag.STAIRS.isTagged(spot.getType())) {
@@ -1189,7 +1206,7 @@ public final class FarmAreaService {
                 above.setType(Material.AIR, false);
             }
         }
-        if (SoulChestService.isChestLike(spot.getType()) || spot.getType() == Material.CRAFTING_TABLE) {
+        if (SoulChestService.isChestLike(spot.getType()) || spot.getType() == Material.CRAFTING_TABLE || spot.getType() == Material.COMPOSTER) {
             return;
         }
         BlockFace facing = faceTowardHome(data, spot.getX(), spot.getZ());
@@ -1205,6 +1222,29 @@ public final class FarmAreaService {
         }
         protect(spot, golemId);
         refreshFenceConnections(spot);
+        placeGatePathUnder(data, spot, golemId);
+    }
+
+    public void placeGatePathUnder(SoulGolemData data, Block gateSpot, UUID golemId) {
+        if (data == null || gateSpot == null || !isGatePathEnabled(data)) {
+            return;
+        }
+        Block under = gateSpot.getRelative(BlockFace.DOWN);
+        Material path = resolveGatePathMaterial(data);
+        if (under.getType() == path) {
+            protect(under, golemId);
+            return;
+        }
+        if (SoulChestService.isChestLike(under.getType()) || under.getType() == Material.CRAFTING_TABLE || under.getType() == Material.COMPOSTER) {
+            return;
+        }
+        if (Tag.FENCES.isTagged(under.getType()) || Tag.FENCE_GATES.isTagged(under.getType())) {
+            return;
+        }
+        BlockPos pos = BlockPos.of(under);
+        this.originals.putIfAbsent(pos, under.getType());
+        under.setType(path, false);
+        protect(under, golemId);
     }
 
     public void clearOuterFenceObstruction(Block block, SoulGolemData data) {
@@ -1270,7 +1310,7 @@ public final class FarmAreaService {
             Block below = at.getRelative(BlockFace.DOWN);
             if ((below.getType().isSolid() || below.getType() == Material.FARMLAND)
                     && !SoulChestService.isChestLike(at.getType())
-                    && at.getType() != Material.CRAFTING_TABLE
+                    && at.getType() != Material.CRAFTING_TABLE && at.getType() != Material.COMPOSTER
                     && (!at.getType().isSolid() || isVegetation(at.getType()) || at.equals(junk))) {
                 return at.getLocation().add(0.5D, 0.0D, 0.5D);
             }
@@ -1344,7 +1384,7 @@ public final class FarmAreaService {
         for (int y = homeY + 2; y >= homeY - 4; y--) {
             Block ground = world.getBlockAt(x, y, z);
             if (!ground.getType().isSolid() || SoulChestService.isChestLike(ground.getType())
-                    || ground.getType() == Material.CRAFTING_TABLE
+                    || ground.getType() == Material.CRAFTING_TABLE || ground.getType() == Material.COMPOSTER
                     || Tag.STAIRS.isTagged(ground.getType())) {
                 continue;
             }
@@ -1479,7 +1519,7 @@ public final class FarmAreaService {
         for (int[] o : offsets) {
             Block at = spot.getRelative(o[0], 0, o[1]);
             Block below = at.getRelative(BlockFace.DOWN);
-            if (SoulChestService.isChestLike(at.getType()) || at.getType() == Material.CRAFTING_TABLE) {
+            if (SoulChestService.isChestLike(at.getType()) || at.getType() == Material.CRAFTING_TABLE || at.getType() == Material.COMPOSTER) {
                 continue;
             }
             if ((below.getType().isSolid() || below.getType() == Material.FARMLAND)
@@ -1500,7 +1540,7 @@ public final class FarmAreaService {
         for (int[] o : offsets) {
             Block at = spot.getRelative(o[0], 0, o[1]);
             Block below = at.getRelative(BlockFace.DOWN);
-            if (SoulChestService.isChestLike(at.getType()) || at.getType() == Material.CRAFTING_TABLE) {
+            if (SoulChestService.isChestLike(at.getType()) || at.getType() == Material.CRAFTING_TABLE || at.getType() == Material.COMPOSTER) {
                 continue;
             }
             if (!(below.getType().isSolid() || below.getType() == Material.FARMLAND)) {
@@ -1556,13 +1596,38 @@ public final class FarmAreaService {
             return true;
         }
         golem.wanderTarget(null);
-        if (GolemMovement.horizontalDistanceSquared(at, safe) > 25.0D) {
+        golem.clearPathWaypoint();
+        if (movement != null) {
             movement.stop(copper);
-            copper.teleport(safe);
+        }
+        copper.setVelocity(new org.bukkit.util.Vector(0, 0, 0));
+        copper.teleport(safe);
+        return true;
+    }
+
+    public boolean needsRescue(Location location, SoulGolemData data) {
+        if (location.getWorld() == null) {
+            return false;
+        }
+        if (isSeatedOnOwnBench(location, data)) {
+            return false;
+        }
+        if (!insideWoolBorder(data, location)) {
             return true;
         }
-        movement.walkTowards(copper, safe, golem);
-        return false;
+        if (bodyClipped(location, data)) {
+            return true;
+        }
+        if (isWaterColumn(data, location.getBlockX(), location.getBlockZ())) {
+            return true;
+        }
+        Block at = location.getBlock();
+        Block below = at.getRelative(BlockFace.DOWN);
+        if (at.isLiquid() || below.isLiquid()) {
+            return true;
+        }
+        int homeY = (int) Math.floor(data.homeY());
+        return location.getY() < homeY - 0.2D;
     }
 
     public boolean hasValidSeat(SoulGolemData data) {
@@ -1687,13 +1752,6 @@ public final class FarmAreaService {
             oz += back.getModZ() * 0.2D;
         }
         return seat.getLocation().add(ox, oy, oz);
-    }
-
-    public void debugSeat(String message) {
-        if (!settings().debugSeat) {
-            return;
-        }
-        Bukkit.getLogger().info("[SoulGolem:seat] " + message);
     }
 
     public boolean isSeatedOnOwnBench(Location location, SoulGolemData data) {
@@ -1954,7 +2012,7 @@ public final class FarmAreaService {
             protect(spot, golemId);
             return;
         }
-        if (SoulChestService.isChestLike(spot.getType()) || spot.getType() == Material.CRAFTING_TABLE
+        if (SoulChestService.isChestLike(spot.getType()) || spot.getType() == Material.CRAFTING_TABLE || spot.getType() == Material.COMPOSTER
                 || Tag.STAIRS.isTagged(spot.getType())
                 || Tag.FENCES.isTagged(spot.getType())
                 || Tag.FENCE_GATES.isTagged(spot.getType())
@@ -2007,6 +2065,13 @@ public final class FarmAreaService {
         Block gateSpot = outerFenceGateSpot(data, radius);
         if (gateSpot != null && (gateSpot.getType() == gate || Tag.FENCE_GATES.isTagged(gateSpot.getType()))) {
             gateSpot.setType(Material.AIR, false);
+        }
+        if (isGatePathEnabled(data)) {
+            Block pathSpot = gatePathSpot(data, radius);
+            Material path = resolveGatePathMaterial(data);
+            if (pathSpot != null && pathSpot.getType() == path) {
+                pathSpot.setType(Material.GRASS_BLOCK, false);
+            }
         }
 
         int homeX = (int) Math.floor(data.homeX());
@@ -2166,6 +2231,26 @@ public final class FarmAreaService {
         return CropType.byCrop(material) != null;
     }
 
+    public void protectOwnedBlock(Block block, UUID golemId) {
+        protect(block, golemId);
+    }
+
+    public void unprotectBlock(Block block) {
+        if (block == null) {
+            return;
+        }
+        BlockPos pos = BlockPos.of(block);
+        UUID golemId = this.farmBlocks.remove(pos);
+        this.originals.remove(pos);
+        if (golemId != null) {
+            Set<BlockPos> keys = this.byGolem.get(golemId);
+            if (keys != null) {
+                keys.remove(pos);
+            }
+        }
+        this.workAreaService.unprotect(block);
+    }
+
     public boolean isFarmProtected(Block block) {
         return this.farmBlocks.containsKey(BlockPos.of(block)) || this.workAreaService.isProtected(block);
     }
@@ -2264,7 +2349,7 @@ public final class FarmAreaService {
             if (!ground.getType().isSolid() && ground.getType() != Material.FARMLAND) {
                 continue;
             }
-            if (SoulChestService.isChestLike(ground.getType()) || ground.getType() == Material.CRAFTING_TABLE) {
+            if (SoulChestService.isChestLike(ground.getType()) || ground.getType() == Material.CRAFTING_TABLE || ground.getType() == Material.COMPOSTER) {
                 continue;
             }
             Block above = ground.getRelative(BlockFace.UP);
@@ -2328,7 +2413,7 @@ public final class FarmAreaService {
                 }
                 continue;
             }
-            if (SoulChestService.isChestLike(type) || type == Material.CRAFTING_TABLE) {
+            if (SoulChestService.isChestLike(type) || type == Material.CRAFTING_TABLE || type == Material.COMPOSTER) {
                 return true;
             }
             if (Tag.STAIRS.isTagged(type)) {
@@ -2364,28 +2449,6 @@ public final class FarmAreaService {
             return;
         }
         protect(seat, data.id());
-    }
-
-    public boolean needsRescue(Location location, SoulGolemData data) {
-        if (location.getWorld() == null) {
-            return false;
-        }
-        if (isSeatedOnOwnBench(location, data)) {
-            return false;
-        }
-        if (bodyClipped(location, data)) {
-            return true;
-        }
-        if (isWaterColumn(data, location.getBlockX(), location.getBlockZ())) {
-            return true;
-        }
-        Block at = location.getBlock();
-        Block below = at.getRelative(BlockFace.DOWN);
-        if (at.isLiquid() || below.isLiquid()) {
-            return true;
-        }
-        int homeY = (int) Math.floor(data.homeY());
-        return location.getY() < homeY - 0.2D;
     }
 
     private record BlockPos(UUID worldId, int x, int y, int z) {

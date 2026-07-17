@@ -266,7 +266,7 @@ public final class GolemSetupWork {
             if (!ground.getType().isSolid() && ground.getType() != Material.FARMLAND) {
                 continue;
             }
-            if (SoulChestService.isChestLike(feet.getType()) || feet.getType() == Material.CRAFTING_TABLE) {
+            if (SoulChestService.isChestLike(feet.getType()) || feet.getType() == Material.CRAFTING_TABLE || feet.getType() == Material.COMPOSTER) {
                 continue;
             }
             if (feet.getType().isSolid()
@@ -421,8 +421,7 @@ public final class GolemSetupWork {
         SetupPhase next = switch (golem.setupPhase()) {
             case CLEAR -> SetupPhase.BORDER;
             case BORDER -> SetupPhase.CHEST;
-            case CHEST -> golem.data().type() == GolemType.FARMER ? SetupPhase.CRAFT : SetupPhase.DONE;
-            case CRAFT -> SetupPhase.DONE;
+            case CHEST, CRAFT -> SetupPhase.DONE;
             case DONE -> SetupPhase.DONE;
         };
         if (next == SetupPhase.DONE) {
@@ -565,7 +564,7 @@ public final class GolemSetupWork {
             if (type.isAir()) {
                 continue;
             }
-            if (SoulChestService.isChestLike(type) || type == Material.CRAFTING_TABLE) {
+            if (SoulChestService.isChestLike(type) || type == Material.CRAFTING_TABLE || type == Material.COMPOSTER) {
                 continue;
             }
             if (type.isSolid() || type == Material.SNOW || FarmAreaService.isVegetation(type)) {
@@ -579,7 +578,7 @@ public final class GolemSetupWork {
             return true;
         }
         Material type = floor.getBlock().getType();
-        if (SoulChestService.isChestLike(type) || type == Material.CRAFTING_TABLE) {
+        if (SoulChestService.isChestLike(type) || type == Material.CRAFTING_TABLE || type == Material.COMPOSTER) {
             return true;
         }
         return this.farmAreaService.isBorderMaterial(type);

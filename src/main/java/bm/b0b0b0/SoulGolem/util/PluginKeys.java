@@ -11,6 +11,7 @@ public final class PluginKeys {
     private final NamespacedKey owner;
     private final NamespacedKey chestGolemId;
     private final NamespacedKey craftGolemId;
+    private final NamespacedKey compostGolemId;
 
     public PluginKeys(Plugin plugin) {
         this.statue = new NamespacedKey(plugin, "statue");
@@ -19,6 +20,7 @@ public final class PluginKeys {
         this.owner = new NamespacedKey(plugin, "owner");
         this.chestGolemId = new NamespacedKey(plugin, "chest_golem_id");
         this.craftGolemId = new NamespacedKey(plugin, "craft_golem_id");
+        this.compostGolemId = new NamespacedKey(plugin, "compost_golem_id");
     }
 
     public NamespacedKey statue() {
@@ -43,5 +45,9 @@ public final class PluginKeys {
 
     public NamespacedKey craftGolemId() {
         return this.craftGolemId;
+    }
+
+    public NamespacedKey compostGolemId() {
+        return this.compostGolemId;
     }
 }

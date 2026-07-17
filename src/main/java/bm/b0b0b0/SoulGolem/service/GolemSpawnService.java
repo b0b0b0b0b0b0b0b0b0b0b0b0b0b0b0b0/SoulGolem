@@ -131,15 +131,6 @@ public final class GolemSpawnService {
             messages.send(player, "spawn-no-chest-space");
             return true;
         }
-        Location craftLoc = null;
-        if (type == GolemType.FARMER) {
-            craftLoc = this.chestService.findCraftingTableLocation(chestLoc, homeCenter, radius);
-            if (craftLoc == null) {
-                messages.send(player, "spawn-no-craft-space");
-                return true;
-            }
-        }
-
         if (settings.activationXpLevels > 0 && !player.hasPermission(settings.permissions.admin)) {
             player.setLevel(player.getLevel() - settings.activationXpLevels);
         }
@@ -163,9 +154,6 @@ public final class GolemSpawnService {
         data.level(1);
         data.energy(settings.energyCapacity);
         data.paused(false);
-        if (craftLoc != null) {
-            data.craftPosition(craftLoc.getBlockX(), craftLoc.getBlockY(), craftLoc.getBlockZ());
-        }
 
         CopperGolem entity = spawnEntity(data);
         data.entityUuid(entity.getUniqueId());
@@ -437,6 +425,17 @@ public final class GolemSpawnService {
                     this.chestService.tagExistingCraftingTable(craft, data.id(), data.ownerUuid());
                     this.workAreaService.protect(craft.getBlock(), data.id());
                 }
+                if (data.hasCompostStation()) {
+                    Location compost = new Location(
+                            golemLoc.getWorld(),
+                            data.compostX(),
+                            data.compostY(),
+                            data.compostZ()
+                    );
+                    this.chestService.clearStationColumn(compost);
+                    this.chestService.tagExistingComposter(compost, data.id());
+                    this.workAreaService.protect(compost.getBlock(), data.id());
+                }
                 if (data.type() == GolemType.MINER) {
                     this.workAreaService.seedOres(data, radius, this.oreTableService);
                     active.state(MinerState.IDLE);
@@ -546,6 +545,7 @@ public final class GolemSpawnService {
         int radius = this.chestService.effectiveRadius(data);
         this.chestService.removeHologram(data);
         this.chestService.removeCraftingTable(data);
+        this.chestService.removeComposter(data);
         this.chestService.removeChestBlock(data);
         this.farmAreaService.removeGolemArea(data, radius, this.oreTableService);
         this.workAreaService.removeGolemArea(data, radius, this.oreTableService);

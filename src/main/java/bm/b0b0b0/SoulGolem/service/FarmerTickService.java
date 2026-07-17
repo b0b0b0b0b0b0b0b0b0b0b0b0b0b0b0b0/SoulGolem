@@ -10,6 +10,7 @@ import bm.b0b0b0.SoulGolem.repository.GolemRepository;
 import bm.b0b0b0.SoulGolem.scheduler.PluginSchedulers;
 import bm.b0b0b0.SoulGolem.service.farmer.FarmerCarried;
 import bm.b0b0b0.SoulGolem.service.farmer.FarmerChestWork;
+import bm.b0b0b0.SoulGolem.service.farmer.FarmerCompostWork;
 import bm.b0b0b0.SoulGolem.service.farmer.FarmerContext;
 import bm.b0b0b0.SoulGolem.service.farmer.FarmerCycle;
 import bm.b0b0b0.SoulGolem.service.farmer.FarmerFieldWork;
@@ -23,6 +24,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
+import org.bukkit.Material;
 import org.bukkit.entity.CopperGolem;
 import org.bukkit.entity.Entity;
 import org.bukkit.plugin.Plugin;
@@ -33,6 +35,7 @@ public final class FarmerTickService {
     private final FarmerCycle cycle;
     private final FarmerFieldWork field;
     private final FarmerSupportWork support;
+    private final FarmerCompostWork compost;
     private final FarmerChestWork chest;
     private final GolemSetupWork setup;
     private final AtomicInteger cursor = new AtomicInteger();
@@ -65,6 +68,7 @@ public final class FarmerTickService {
         this.cycle = new FarmerCycle(this.context);
         this.field = new FarmerFieldWork(this.context, carried);
         this.support = new FarmerSupportWork(this.context, carried);
+        this.compost = new FarmerCompostWork(this.context, carried, workAreaService);
         this.chest = new FarmerChestWork(this.context);
         this.setup = new GolemSetupWork(
                 chestService,
@@ -74,8 +78,10 @@ public final class FarmerTickService {
                 this.context.movement()
         );
         this.field.wire(this.cycle, this.support);
-        this.support.wire(this.cycle);
-        this.chest.wire(this.cycle, this.field, this.support);
+        this.support.wire(this.cycle, this.compost, this.chest);
+        this.compost.wire(this.cycle);
+        this.cycle.wire(this.compost, this.chest);
+        this.chest.wire(this.cycle, this.field, this.support, this.compost, carried);
     }
 
     public void start() {
@@ -155,43 +161,23 @@ public final class FarmerTickService {
             this.context.movement().stop(copper);
         }
         boolean setupBusy = GolemSetupWork.isSetupState(golem);
-        boolean workingMove = setupBusy
-                || state == FarmerState.MOVING_TO_CLEAR
-                || state == FarmerState.CLEARING
-                || state == FarmerState.PREPARE_FIELD
-                || state == FarmerState.MOVING_TO_TILL
-                || state == FarmerState.TILLING
-                || state == FarmerState.MOVING_TO_PLANT
-                || state == FarmerState.PLANTING
-                || state == FarmerState.MOVING_TO_HARVEST
-                || state == FarmerState.HARVESTING
-                || state == FarmerState.MOVING_TO_BONEMEAL
-                || state == FarmerState.APPLYING_BONEMEAL
-                || state == FarmerState.MOVING_TO_TORCH
-                || state == FarmerState.PLACING_TORCH
-                || state == FarmerState.MOVING_TO_FENCE_CLEAR
+        boolean fenceDuty = state == FarmerState.MOVING_TO_FENCE_CLEAR
                 || state == FarmerState.CLEARING_FENCE
                 || state == FarmerState.MOVING_TO_FENCE
                 || state == FarmerState.PLACING_FENCE
                 || state == FarmerState.MOVING_TO_GATE
                 || state == FarmerState.PLACING_GATE
                 || state == FarmerState.MOVING_TO_CLOSE_GATE
-                || state == FarmerState.CLOSING_GATE
-                || state == FarmerState.MOVING_TO_SHELTER
-                || state == FarmerState.BUILDING_SHELTER
-                || state == FarmerState.SHELTERING
-                || state == FarmerState.MOVING_TO_COMBAT
-                || state == FarmerState.COMBATING
-                || state == FarmerState.MOVING_TO_CHEST
-                || state == FarmerState.MOVING_TO_CRAFT;
-        if (!workingMove
-                && state != FarmerState.WAITING_SEEDS
-                && state != FarmerState.SITTING
-                && state != FarmerState.MOVING_TO_SEAT
-                && state != FarmerState.PLACING_SEAT
+                || state == FarmerState.CLOSING_GATE;
+        if (!setupBusy
+                && !fenceDuty
                 && this.context.farmAreaService().needsRescue(copper.getLocation(), data)) {
             Location safe = this.context.farmAreaService().safeStandNearHome(data);
             if (safe != null) {
+                golem.wanderTarget(null);
+                golem.clearPathWaypoint();
+                this.context.movement().stop(copper);
+                copper.setVelocity(new org.bukkit.util.Vector(0, 0, 0));
                 copper.teleport(safe);
             }
         }
@@ -203,6 +189,9 @@ public final class FarmerTickService {
             this.context.equipShovel(copper);
         } else if (this.context.combat().isCombatState(golem)) {
             this.context.combat().equipIfArmed(golem, copper);
+        } else if ((state == FarmerState.MOVING_TO_BONEMEAL || state == FarmerState.APPLYING_BONEMEAL)
+                && FarmerCarried.countCarried(golem, Material.BONE_MEAL) > 0) {
+            this.context.equipBoneMeal(copper);
         } else {
             GolemSpawnService.equipTool(copper, data.type(), this.context.settings());
         }
@@ -308,6 +297,7 @@ public final class FarmerTickService {
             case MOVING_TO_CHEST -> this.chest.continueDeposit(golem, copper);
             case WAITING_CHEST -> this.cycle.retryChest(golem);
             case MOVING_TO_CRAFT, CRAFTING -> this.chest.continueCraft(golem, copper);
+            case MOVING_TO_PLACE_CRAFT, PLACING_CRAFT -> this.chest.continuePlaceCraft(golem, copper);
             case MOVING_TO_TORCH, PLACING_TORCH -> this.support.continueTorch(golem, copper);
             case MOVING_TO_SEAT, PLACING_SEAT, SITTING -> this.support.continueSeat(golem, copper);
             case MOVING_TO_CLEAR, CLEARING -> this.support.continueClear(golem, copper);
@@ -316,6 +306,9 @@ public final class FarmerTickService {
                  MOVING_TO_GATE, PLACING_GATE -> this.support.continueFence(golem, copper);
             case MOVING_TO_CLOSE_GATE, CLOSING_GATE -> this.support.continueCloseGate(golem, copper);
             case MOVING_TO_BONEMEAL, APPLYING_BONEMEAL -> this.field.continueBoneMeal(golem, copper);
+            case MOVING_TO_PLACE_COMPOSTER, PLACING_COMPOSTER -> this.compost.continuePlace(golem, copper);
+            case MOVING_TO_COMPOST, COMPOSTING -> this.compost.continueFill(golem, copper);
+            case MOVING_TO_COLLECT_COMPOST, COLLECTING_COMPOST -> this.compost.continueCollect(golem, copper);
             case RESTING -> this.cycle.continueRest(golem);
             case MOVING_TO_SHELTER, BUILDING_SHELTER, SHELTERING -> this.support.continueShelter(golem, copper);
             case MOVING_TO_COMBAT, COMBATING -> this.context.combat().continueCombat(golem, copper);
@@ -336,7 +329,8 @@ public final class FarmerTickService {
         return switch (state) {
             case WAITING_SEEDS, WAIT_GROWTH, WAITING_CHEST, RESTING, SITTING, SHELTERING,
                  TILLING, PLANTING, HARVESTING, APPLYING_BONEMEAL, CRAFTING,
-                 PLACING_TORCH, PLACING_SEAT, PLACING_FENCE, PLACING_GATE,
+                 PLACING_TORCH, PLACING_SEAT, PLACING_FENCE, PLACING_GATE, PLACING_CRAFT, PLACING_COMPOSTER,
+                 COMPOSTING, COLLECTING_COMPOST,
                  CLEARING, CLEARING_FENCE, CLOSING_GATE, BUILDING_SHELTER -> true;
             default -> false;
         };

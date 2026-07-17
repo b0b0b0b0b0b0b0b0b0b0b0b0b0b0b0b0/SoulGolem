@@ -183,11 +183,11 @@ public final class WorkAreaService {
     private void placeBorderFloorExact(World world, int x, int homeY, int z, Material border, UUID golemId) {
         Block atHome = world.getBlockAt(x, homeY, z);
         Block aboveHome = world.getBlockAt(x, homeY + 1, z);
-        if (SoulChestService.isChestLike(atHome.getType()) || atHome.getType() == Material.CRAFTING_TABLE) {
+        if (SoulChestService.isChestLike(atHome.getType()) || atHome.getType() == Material.CRAFTING_TABLE || atHome.getType() == Material.COMPOSTER) {
             ensureSupportUnder(atHome, border, golemId);
             return;
         }
-        if (SoulChestService.isChestLike(aboveHome.getType()) || aboveHome.getType() == Material.CRAFTING_TABLE) {
+        if (SoulChestService.isChestLike(aboveHome.getType()) || aboveHome.getType() == Material.CRAFTING_TABLE || aboveHome.getType() == Material.COMPOSTER) {
             ensureSupportUnder(aboveHome, border, golemId);
             return;
         }
@@ -242,7 +242,7 @@ public final class WorkAreaService {
         if (ground.getType() == border) {
             return;
         }
-        if (SoulChestService.isChestLike(ground.getType()) || ground.getType() == Material.CRAFTING_TABLE) {
+        if (SoulChestService.isChestLike(ground.getType()) || ground.getType() == Material.CRAFTING_TABLE || ground.getType() == Material.COMPOSTER) {
             return;
         }
         list.add(ground.getLocation());
@@ -251,11 +251,11 @@ public final class WorkAreaService {
     private void placeBorderFloor(World world, int x, int homeY, int z, Material border, UUID golemId) {
         Block atHome = world.getBlockAt(x, homeY, z);
         Block aboveHome = world.getBlockAt(x, homeY + 1, z);
-        if (SoulChestService.isChestLike(atHome.getType()) || atHome.getType() == Material.CRAFTING_TABLE) {
+        if (SoulChestService.isChestLike(atHome.getType()) || atHome.getType() == Material.CRAFTING_TABLE || atHome.getType() == Material.COMPOSTER) {
             ensureSupportUnder(atHome, border, golemId);
             return;
         }
-        if (SoulChestService.isChestLike(aboveHome.getType()) || aboveHome.getType() == Material.CRAFTING_TABLE) {
+        if (SoulChestService.isChestLike(aboveHome.getType()) || aboveHome.getType() == Material.CRAFTING_TABLE || aboveHome.getType() == Material.COMPOSTER) {
             Block support = aboveHome.getRelative(0, -1, 0);
             if (needsStationSupport(support.getType())) {
                 BlockPos pos = BlockPos.of(support);
@@ -276,12 +276,12 @@ public final class WorkAreaService {
             }
             return;
         }
-        if (SoulChestService.isChestLike(ground.getType()) || ground.getType() == Material.CRAFTING_TABLE) {
+        if (SoulChestService.isChestLike(ground.getType()) || ground.getType() == Material.CRAFTING_TABLE || ground.getType() == Material.COMPOSTER) {
             ensureSupportUnder(ground, border, golemId);
             return;
         }
         Block above = ground.getRelative(0, 1, 0);
-        if (SoulChestService.isChestLike(above.getType()) || above.getType() == Material.CRAFTING_TABLE) {
+        if (SoulChestService.isChestLike(above.getType()) || above.getType() == Material.CRAFTING_TABLE || above.getType() == Material.COMPOSTER) {
             ensureSupportUnder(above, border, golemId);
             return;
         }
@@ -365,6 +365,22 @@ public final class WorkAreaService {
             }
         }
         this.byGolem.computeIfAbsent(golemId, id -> ConcurrentHashMap.newKeySet()).add(pos);
+    }
+
+    public void unprotect(Block block) {
+        if (block == null) {
+            return;
+        }
+        BlockPos pos = BlockPos.of(block);
+        UUID golemId = this.protectedBlocks.remove(pos);
+        this.originals.remove(pos);
+        if (golemId == null) {
+            return;
+        }
+        Set<BlockPos> keys = this.byGolem.get(golemId);
+        if (keys != null) {
+            keys.remove(pos);
+        }
     }
 
     public boolean isProtected(Block block) {

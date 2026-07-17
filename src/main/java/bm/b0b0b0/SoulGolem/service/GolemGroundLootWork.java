@@ -173,6 +173,8 @@ public final class GolemGroundLootWork {
                 || golem.fetchingFence()
                 || golem.fetchingGate()
                 || golem.fetchingBoneMeal()
+                || golem.fetchingComposter()
+                || golem.fetchingCompost()
                 || golem.fetchingFeed()
                 || golem.fetchingWeapon();
     }

@@ -16,9 +16,16 @@ import org.bukkit.inventory.ItemStack;
 public final class FarmerCycle {
 
     private final FarmerContext ctx;
+    private FarmerCompostWork compost;
+    private FarmerChestWork chest;
 
     public FarmerCycle(FarmerContext ctx) {
         this.ctx = ctx;
+    }
+
+    public void wire(FarmerCompostWork compost, FarmerChestWork chest) {
+        this.compost = compost;
+        this.chest = chest;
     }
 
     public void beginCycle(ActiveGolem golem, CopperGolem copper) {
@@ -30,6 +37,21 @@ public final class FarmerCycle {
         }
         if (!golem.carried().isEmpty()) {
             if (this.ctx.resumeBoneMealCarried(golem)) {
+                return;
+            }
+            if (this.compost != null && this.compost.carryingCompostables(golem)
+                    && this.compost.hasValidComposter(golem.data())
+                    && !this.compost.isCompostReady(golem.data())) {
+                golem.clearFetchFlags();
+                golem.farmerState(FarmerState.MOVING_TO_COMPOST);
+                return;
+            }
+            if (FarmerCarried.countCarried(golem, Material.COMPOSTER) > 0 && this.compost != null
+                    && this.compost.tryStartPlace(golem)) {
+                return;
+            }
+            if (FarmerCarried.countCarried(golem, Material.CRAFTING_TABLE) > 0 && this.chest != null
+                    && this.chest.tryStartPlaceCraft(golem)) {
                 return;
             }
             if (tryStartPlant(golem)) {
@@ -163,7 +185,7 @@ public final class FarmerCycle {
 
     public boolean tryStartBread(ActiveGolem golem) {
         if (!this.ctx.settings().farmer.craftBread
-                || !golem.data().hasCraftStation()
+                || !this.ctx.chestService().isCraftPresent(golem.data())
                 || this.ctx.chestService().countItem(golem.data(), Material.WHEAT) < 3
                 || !this.ctx.chestService().hasSpace(golem.data())) {
             return false;
@@ -204,12 +226,20 @@ public final class FarmerCycle {
 
         List<Block> mature = this.ctx.farmAreaService().matureCrops(golem.data(), radius, this.ctx.enabledCrops());
         if (!mature.isEmpty()) {
+            long noticeTicks = Math.max(0L, farmer.harvestNoticeTicks);
+            if (noticeTicks > 0L && golem.harvestNoticeUntil() <= 0L) {
+                golem.armHarvestNotice(noticeTicks);
+            }
+            if (!golem.harvestNoticeReady()) {
+                return false;
+            }
             golem.clearFetchFlags();
             golem.wanderTarget(null);
             golem.targetCrop(this.ctx.farthestPlot(golem.data(), mature));
             golem.farmerState(FarmerState.MOVING_TO_HARVEST);
             return true;
         }
+        golem.clearHarvestNotice();
 
         List<Block> weeds = this.ctx.farmAreaService().fieldWeeds(golem.data(), radius);
         if (!weeds.isEmpty()) {
@@ -236,12 +266,7 @@ public final class FarmerCycle {
             return true;
         }
 
-        if (this.ctx.hasOpenPlantSpots(golem.data()) && !this.ctx.hasAnySeedInChest(golem.data())) {
-            golem.clearFetchFlags();
-            golem.wanderTarget(null);
-            golem.targetCrop(null);
-            golem.farmerState(FarmerState.WAITING_SEEDS);
-            golem.data().lastActionAt(System.currentTimeMillis());
+        if (this.chest != null && this.chest.tryStartPlaceCraft(golem)) {
             return true;
         }
 
@@ -249,8 +274,30 @@ public final class FarmerCycle {
             return true;
         }
 
+        if (this.compost != null) {
+            if (this.compost.tryStartCollect(golem)) {
+                return true;
+            }
+            if (this.compost.tryStartPlace(golem)) {
+                return true;
+            }
+        }
+
         if (farmer.useBoneMeal && this.ctx.hasBoneMealWork(golem)) {
+            int meal = this.compost == null ? this.ctx.chestService().countItem(golem.data(), Material.BONE_MEAL)
+                    : this.compost.boneMealAvailable(golem);
+            if (meal > 0) {
+                this.ctx.requestBoneMealFromChest(golem);
+                return true;
+            }
+            if (this.compost != null && this.compost.tryStartFill(golem)) {
+                return true;
+            }
             this.ctx.requestBoneMealFromChest(golem);
+            return true;
+        }
+
+        if (this.compost != null && this.compost.tryStartFill(golem)) {
             return true;
         }
 
@@ -282,6 +329,18 @@ public final class FarmerCycle {
                 golem.farmerState(FarmerState.MOVING_TO_CHEST);
                 return true;
             }
+        }
+
+        if (this.ctx.hasOpenPlantSpots(golem.data()) && !this.ctx.hasAnySeedInChest(golem.data())) {
+            if (this.ctx.farmAreaService().hasFieldCrops(golem.data(), radius, this.ctx.enabledCrops())) {
+                return false;
+            }
+            golem.clearFetchFlags();
+            golem.wanderTarget(null);
+            golem.targetCrop(null);
+            golem.farmerState(FarmerState.WAITING_SEEDS);
+            golem.data().lastActionAt(System.currentTimeMillis());
+            return true;
         }
 
         return false;

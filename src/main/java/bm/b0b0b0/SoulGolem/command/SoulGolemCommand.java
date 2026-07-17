@@ -1,8 +1,10 @@
 package bm.b0b0b0.SoulGolem.command;
 
 import bm.b0b0b0.SoulGolem.config.ConfigurationLoader;
+import bm.b0b0b0.SoulGolem.config.settings.Settings;
 import bm.b0b0b0.SoulGolem.gui.GolemGuiService;
 import bm.b0b0b0.SoulGolem.item.StatueItemFactory;
+import bm.b0b0b0.SoulGolem.item.StatueRecipeService;
 import bm.b0b0b0.SoulGolem.message.MessageService;
 import bm.b0b0b0.SoulGolem.model.GolemType;
 import bm.b0b0b0.SoulGolem.service.OreTableService;
@@ -22,6 +24,7 @@ public final class SoulGolemCommand implements CommandExecutor, TabCompleter {
 
     private final ConfigurationLoader configurationLoader;
     private final StatueItemFactory statueFactory;
+    private final StatueRecipeService statueRecipes;
     private final OreTableService oreTable;
     private final SoulChestService chestService;
     private final GolemGuiService guiService;
@@ -29,12 +32,14 @@ public final class SoulGolemCommand implements CommandExecutor, TabCompleter {
     public SoulGolemCommand(
             ConfigurationLoader configurationLoader,
             StatueItemFactory statueFactory,
+            StatueRecipeService statueRecipes,
             OreTableService oreTable,
             SoulChestService chestService,
             GolemGuiService guiService
     ) {
         this.configurationLoader = configurationLoader;
         this.statueFactory = statueFactory;
+        this.statueRecipes = statueRecipes;
         this.oreTable = oreTable;
         this.chestService = chestService;
         this.guiService = guiService;
@@ -44,14 +49,30 @@ public final class SoulGolemCommand implements CommandExecutor, TabCompleter {
         return this.configurationLoader.messages();
     }
 
+    private Settings.Permissions permissions() {
+        return this.configurationLoader.config().settings().permissions;
+    }
+
+    private boolean has(CommandSender sender, String permission) {
+        Settings.Permissions perms = permissions();
+        return sender.hasPermission(perms.admin) || sender.hasPermission(permission);
+    }
+
+    private boolean denyUnless(CommandSender sender, String permission) {
+        if (has(sender, permission)) {
+            return false;
+        }
+        messages().send(sender, "command-no-permission");
+        return true;
+    }
+
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         if (args.length == 0) {
             messages().send(sender, "command-usage");
             return true;
         }
-        String sub = args[0].toLowerCase(Locale.ROOT);
-        return switch (sub) {
+        return switch (args[0].toLowerCase(Locale.ROOT)) {
             case "give" -> handleGive(sender, args);
             case "reload" -> handleReload(sender);
             case "list", "gui" -> handleGui(sender);
@@ -63,118 +84,66 @@ public final class SoulGolemCommand implements CommandExecutor, TabCompleter {
     }
 
     private boolean handleGive(CommandSender sender, String[] args) {
-        var permissions = this.configurationLoader.config().settings().permissions;
-        if (!sender.hasPermission(permissions.give) && !sender.hasPermission(permissions.admin)) {
-            messages().send(sender, "command-no-permission");
+        if (denyUnless(sender, permissions().give)) {
+            return true;
+        }
+        if (args.length < 3) {
+            messages().send(sender, "command-give-usage");
             return true;
         }
 
-        Player target = null;
-        int amount = 1;
-        GolemType type = GolemType.MINER;
+        Player target = Bukkit.getPlayerExact(args[1]);
+        if (target == null) {
+            messages().send(sender, "command-give-target-offline");
+            return true;
+        }
 
-        if (args.length == 1) {
-            if (!(sender instanceof Player player)) {
-                messages().send(sender, "command-player-only");
+        GolemType type = parseGiveType(args[2]);
+        if (type == null) {
+            messages().send(sender, "command-give-usage");
+            return true;
+        }
+
+        int amount = 1;
+        if (args.length >= 4) {
+            try {
+                amount = Integer.parseInt(args[3]);
+            } catch (NumberFormatException ignored) {
+                messages().send(sender, "command-give-usage");
                 return true;
             }
-            target = player;
-        } else if (args.length == 2) {
-            GolemType parsedType = tryParseType(args[1]);
-            if (parsedType != null) {
-                if (!(sender instanceof Player player)) {
-                    messages().send(sender, "command-player-only");
-                    return true;
-                }
-                target = player;
-                type = parsedType;
-            } else if (isInt(args[1])) {
-                if (!(sender instanceof Player player)) {
-                    messages().send(sender, "command-player-only");
-                    return true;
-                }
-                target = player;
-                amount = Math.max(1, Integer.parseInt(args[1]));
-            } else {
-                target = Bukkit.getPlayerExact(args[1]);
-                if (target == null) {
-                    messages().send(sender, "command-give-target-offline");
-                    return true;
-                }
-            }
-        } else if (args.length == 3) {
-            target = Bukkit.getPlayerExact(args[1]);
-            if (target == null) {
-                messages().send(sender, "command-give-target-offline");
+            if (amount < 1) {
+                messages().send(sender, "command-give-usage");
                 return true;
-            }
-            if (isInt(args[2])) {
-                amount = Math.max(1, Integer.parseInt(args[2]));
-            } else {
-                GolemType parsedType = tryParseType(args[2]);
-                if (parsedType != null) {
-                    type = parsedType;
-                }
-            }
-        } else {
-            target = Bukkit.getPlayerExact(args[1]);
-            if (target == null) {
-                messages().send(sender, "command-give-target-offline");
-                return true;
-            }
-            if (isInt(args[2])) {
-                amount = Math.max(1, Integer.parseInt(args[2]));
-            }
-            GolemType parsedType = tryParseType(args[3]);
-            if (parsedType != null) {
-                type = parsedType;
             }
         }
 
         ItemStack statue = this.statueFactory.create(amount, type);
         target.getInventory().addItem(statue);
+        String typeName = type.name().toLowerCase(Locale.ROOT);
         if (sender.equals(target)) {
             messages().send(sender, "command-give-self",
                     MessageService.stub("amount", String.valueOf(amount)),
-                    MessageService.stub("type", type.name().toLowerCase(Locale.ROOT)));
+                    MessageService.stub("type", typeName));
         } else {
             messages().send(sender, "command-give-other",
                     MessageService.stub("amount", String.valueOf(amount)),
                     MessageService.stub("player", target.getName()),
-                    MessageService.stub("type", type.name().toLowerCase(Locale.ROOT)));
+                    MessageService.stub("type", typeName));
         }
         return true;
     }
 
-    private static GolemType tryParseType(String raw) {
-        if (raw == null) {
-            return null;
-        }
-        String upper = raw.trim().toUpperCase(Locale.ROOT);
-        if ("MINER".equals(upper) || "FARMER".equals(upper)) {
-            return GolemType.valueOf(upper);
-        }
-        return null;
-    }
-
-    private static boolean isInt(String raw) {
-        try {
-            Integer.parseInt(raw);
-            return true;
-        } catch (NumberFormatException exception) {
-            return false;
-        }
-    }
-
     private boolean handleReload(CommandSender sender) {
-        var permissions = this.configurationLoader.config().settings().permissions;
-        if (!sender.hasPermission(permissions.reload) && !sender.hasPermission(permissions.admin)) {
-            messages().send(sender, "command-no-permission");
+        if (denyUnless(sender, permissions().reload)) {
             return true;
         }
         this.configurationLoader.reload();
         this.oreTable.reload();
         this.chestService.updateStationNames(messages().raw("chest-name"), messages().raw("craft-table-name"));
+        if (this.statueRecipes != null) {
+            this.statueRecipes.register();
+        }
         messages().send(sender, "command-reload-done");
         return true;
     }
@@ -184,9 +153,7 @@ public final class SoulGolemCommand implements CommandExecutor, TabCompleter {
             messages().send(sender, "command-player-only");
             return true;
         }
-        var permissions = this.configurationLoader.config().settings().permissions;
-        if (!player.hasPermission(permissions.use) && !player.hasPermission(permissions.admin)) {
-            messages().send(sender, "command-no-permission");
+        if (denyUnless(player, permissions().use)) {
             return true;
         }
         this.guiService.openList(player, 0);
@@ -195,32 +162,61 @@ public final class SoulGolemCommand implements CommandExecutor, TabCompleter {
 
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
-        if (args.length == 1) {
-            return filter(List.of("give", "reload", "list", "gui"), args[0]);
-        }
-        if (args.length == 2 && "give".equalsIgnoreCase(args[0])) {
-            List<String> options = new ArrayList<>();
-            for (Player player : Bukkit.getOnlinePlayers()) {
-                options.add(player.getName());
+        Settings.Permissions perms = permissions();
+        return switch (args.length) {
+            case 1 -> filter(allowedSubcommands(sender, perms), args[0]);
+            case 2 -> {
+                if (!"give".equalsIgnoreCase(args[0]) || !has(sender, perms.give)) {
+                    yield List.of();
+                }
+                yield filter(onlinePlayerNames(), args[1]);
             }
-            options.add("miner");
-            options.add("farmer");
-            options.add("1");
-            options.add("8");
-            return filter(options, args[1]);
+            case 3 -> {
+                if (!"give".equalsIgnoreCase(args[0]) || !has(sender, perms.give)) {
+                    yield List.of();
+                }
+                yield filter(List.of("miner", "farmer"), args[2]);
+            }
+            default -> List.of();
+        };
+    }
+
+    private List<String> allowedSubcommands(CommandSender sender, Settings.Permissions perms) {
+        List<String> options = new ArrayList<>(4);
+        if (has(sender, perms.give)) {
+            options.add("give");
         }
-        if (args.length == 3 && "give".equalsIgnoreCase(args[0])) {
-            return filter(List.of("1", "8", "16", "64", "miner", "farmer"), args[2]);
+        if (has(sender, perms.reload)) {
+            options.add("reload");
         }
-        if (args.length == 4 && "give".equalsIgnoreCase(args[0])) {
-            return filter(List.of("miner", "farmer"), args[3]);
+        if (has(sender, perms.use)) {
+            options.add("list");
+            options.add("gui");
         }
-        return List.of();
+        return options;
+    }
+
+    private static GolemType parseGiveType(String raw) {
+        if ("miner".equalsIgnoreCase(raw)) {
+            return GolemType.MINER;
+        }
+        if ("farmer".equalsIgnoreCase(raw)) {
+            return GolemType.FARMER;
+        }
+        return null;
+    }
+
+    private static List<String> onlinePlayerNames() {
+        List<String> names = new ArrayList<>();
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            names.add(player.getName());
+        }
+        return names;
     }
 
     private static List<String> filter(List<String> options, String token) {
         String lower = token.toLowerCase(Locale.ROOT);
-        List<String> result = new ArrayList<>();
+        List<String> result = new ArrayList<>(options.size());
         for (String option : options) {
             if (option.toLowerCase(Locale.ROOT).startsWith(lower)) {
                 result.add(option);

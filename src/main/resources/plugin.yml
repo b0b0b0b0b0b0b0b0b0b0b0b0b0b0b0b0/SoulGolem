@@ -11,16 +11,24 @@ commands:
     aliases: [ sg, sgol ]
 permissions:
   soulgolem.admin:
-    description: Full admin access
+    description: Full admin access (all subcommands)
     default: op
+    children:
+      soulgolem.use: true
+      soulgolem.give: true
+      soulgolem.reload: true
+      soulgolem.bypass.limit: true
   soulgolem.use:
-    description: Place and manage own golems
+    description: Open golem list GUI (/soulgolem list|gui) and manage own golems
     default: true
   soulgolem.give:
-    description: Give statue items
+    description: Give statue items (/soulgolem give)
     default: op
   soulgolem.reload:
-    description: Reload configuration
+    description: Reload configuration (/soulgolem reload)
+    default: op
+  soulgolem.bypass.limit:
+    description: Bypass personal golem limit
     default: op
 libraries:
   - net.elytrium:serializer:1.1.1

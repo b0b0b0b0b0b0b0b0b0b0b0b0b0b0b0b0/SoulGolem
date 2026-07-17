@@ -182,9 +182,30 @@ public final class MinerTickService {
             return;
         }
 
+        boolean setupBusy = GolemSetupWork.isSetupState(golem);
+        boolean fenceDuty = state == MinerState.MOVING_TO_FENCE_CLEAR
+                || state == MinerState.CLEARING_FENCE
+                || state == MinerState.MOVING_TO_FENCE
+                || state == MinerState.PLACING_FENCE
+                || state == MinerState.MOVING_TO_GATE
+                || state == MinerState.PLACING_GATE
+                || state == MinerState.MOVING_TO_CLOSE_GATE
+                || state == MinerState.CLOSING_GATE;
+        if (!setupBusy
+                && !fenceDuty
+                && this.context.farmAreaService().needsRescue(copper.getLocation(), data)) {
+            Location safe = this.context.farmAreaService().safeStandNearHome(data);
+            if (safe != null) {
+                golem.wanderTarget(null);
+                golem.clearPathWaypoint();
+                this.context.movement().stop(copper);
+                copper.setVelocity(new org.bukkit.util.Vector(0, 0, 0));
+                copper.teleport(safe);
+            }
+        }
+
         long now = System.currentTimeMillis();
         long effectiveInterval = this.context.effectiveWorkIntervalMs(data);
-        boolean setupBusy = GolemSetupWork.isSetupState(golem);
         if (!setupBusy
                 && state != MinerState.MINING
                 && state != MinerState.MOVING_TO_ORE

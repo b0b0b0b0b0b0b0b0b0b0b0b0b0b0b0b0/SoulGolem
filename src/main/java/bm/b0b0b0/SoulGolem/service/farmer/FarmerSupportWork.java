@@ -29,14 +29,18 @@ public final class FarmerSupportWork {
     private final FarmerContext ctx;
     private final FarmerCarried carried;
     private FarmerCycle cycle;
+    private FarmerCompostWork compost;
+    private FarmerChestWork chest;
 
     public FarmerSupportWork(FarmerContext ctx, FarmerCarried carried) {
         this.ctx = ctx;
         this.carried = carried;
     }
 
-    public void wire(FarmerCycle cycle) {
+    public void wire(FarmerCycle cycle, FarmerCompostWork compost, FarmerChestWork chest) {
         this.cycle = cycle;
+        this.compost = compost;
+        this.chest = chest;
     }
 
     public void continueClear(ActiveGolem golem, CopperGolem copper) {
@@ -255,7 +259,12 @@ public final class FarmerSupportWork {
                 if (this.cycle.assignNextJob(golem)) {
                     return;
                 }
-                golem.farmerState(FarmerState.WAIT_GROWTH);
+                if (this.ctx.settings().farmer.collectGroundLoot
+                        && this.ctx.groundLoot().hasLoot(golem.data())) {
+                    golem.farmerState(FarmerState.WAIT_GROWTH);
+                    return;
+                }
+                applySeatPhase(golem, this.ctx.seatWork().sitOnBench(golem, copper));
                 return;
             }
             this.ctx.seatWork().holdOnBench(golem, copper);
@@ -287,12 +296,17 @@ public final class FarmerSupportWork {
     private boolean shouldLeaveSeat(ActiveGolem golem) {
         int radius = this.ctx.chestService().effectiveRadius(golem.data());
         if (!this.ctx.farmAreaService().matureCrops(golem.data(), radius, this.ctx.enabledCrops()).isEmpty()) {
-            return true;
+            long noticeTicks = Math.max(0L, this.ctx.settings().farmer.harvestNoticeTicks);
+            if (noticeTicks > 0L && golem.harvestNoticeUntil() <= 0L) {
+                golem.armHarvestNotice(noticeTicks);
+            }
+            return golem.harvestNoticeReady();
         }
         if (!this.ctx.farmAreaService().fieldWeeds(golem.data(), radius).isEmpty()) {
             return true;
         }
-        if (!this.ctx.farmAreaService().tillableSoil(golem.data(), radius).isEmpty()) {
+        if (!golem.fieldReady()
+                || !this.ctx.farmAreaService().tillableSoil(golem.data(), radius).isEmpty()) {
             return true;
         }
         if (this.ctx.hasPlantWork(golem)) {
@@ -302,10 +316,20 @@ public final class FarmerSupportWork {
         if (farmer.useBoneMeal && this.ctx.hasBoneMealWork(golem)) {
             return true;
         }
+        if (this.compost != null && farmer.useComposter) {
+            if (this.compost.isCompostReady(golem.data())
+                    || this.compost.needsPlaceComposter(golem)
+                    || this.compost.hasFillWork(golem)) {
+                return true;
+            }
+        }
         if (farmer.craftBread
-                && golem.data().hasCraftStation()
+                && this.ctx.chestService().isCraftPresent(golem.data())
                 && this.ctx.chestService().countItem(golem.data(), Material.WHEAT) >= 3
                 && this.ctx.chestService().hasSpace(golem.data())) {
+            return true;
+        }
+        if (this.chest != null && this.chest.needsPlaceCraft(golem)) {
             return true;
         }
         if (canStartTorchJob(golem, radius, farmer)) {
@@ -314,8 +338,25 @@ public final class FarmerSupportWork {
         if (farmer.collectGroundLoot && this.ctx.groundLoot().hasLoot(golem.data())) {
             return true;
         }
-        return farmer.placeFence
-                && this.ctx.farmAreaService().needsOuterFenceWork(golem.data(), radius);
+        if (!farmer.placeFence) {
+            return false;
+        }
+        return this.ctx.farmAreaService().canProgressOuterFence(
+                golem.data(),
+                radius,
+                countCarriedTagged(golem, org.bukkit.Tag.FENCES),
+                countCarriedTagged(golem, org.bukkit.Tag.FENCE_GATES)
+        );
+    }
+
+    private static int countCarriedTagged(ActiveGolem golem, org.bukkit.Tag<Material> tag) {
+        int total = 0;
+        for (ItemStack stack : golem.carried()) {
+            if (stack != null && tag.isTagged(stack.getType())) {
+                total += stack.getAmount();
+            }
+        }
+        return total;
     }
 
     private boolean canStartTorchJob(ActiveGolem golem, int radius, Settings.Farmer farmer) {
@@ -406,7 +447,7 @@ public final class FarmerSupportWork {
 
     public static boolean isClearableJunk(Block block) {
         Material type = block.getType();
-        if (type.isAir() || SoulChestService.isChestLike(type) || type == Material.CRAFTING_TABLE
+        if (type.isAir() || SoulChestService.isChestLike(type) || type == Material.CRAFTING_TABLE || type == Material.COMPOSTER
                 || type == Material.FURNACE || type == Material.BLAST_FURNACE || type == Material.SMOKER) {
             return false;
         }

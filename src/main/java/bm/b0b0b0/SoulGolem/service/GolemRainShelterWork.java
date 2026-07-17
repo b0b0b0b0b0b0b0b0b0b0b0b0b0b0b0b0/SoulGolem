@@ -43,7 +43,6 @@ public final class GolemRainShelterWork {
         );
     }
 
-    /** Only when the golem is actually getting wet and already has a bench. */
     public boolean shouldSeekShelter(CopperGolem copper, boolean enabled) {
         return enabled && this.farmAreaService.isRainedOn(copper);
     }
@@ -55,7 +54,6 @@ public final class GolemRainShelterWork {
                 && this.farmAreaService.isRainedOn(copper);
     }
 
-    /** Stay under roof while storm still wets open sky at home (golem itself is dry under canopy). */
     public boolean shouldStaySheltered(ActiveGolem golem, CopperGolem copper) {
         if (golem == null || copper == null || !copper.isValid()) {
             return false;

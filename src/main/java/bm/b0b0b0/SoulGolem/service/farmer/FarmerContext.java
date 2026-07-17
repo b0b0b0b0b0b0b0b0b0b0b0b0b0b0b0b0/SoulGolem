@@ -259,7 +259,7 @@ public final class FarmerContext {
 
     public boolean stationsOk(ActiveGolem golem) {
         SoulGolemData data = golem.data();
-        if (this.chestService.isChestPresent(data) && this.chestService.isCraftPresent(data)) {
+        if (this.chestService.isChestPresent(data)) {
             return true;
         }
         this.spawnService.removeGolem(data.id(), null);
@@ -295,6 +295,20 @@ public final class FarmerContext {
         equipment.setItemInMainHandDropChance(0.0F);
     }
 
+    public void equipBoneMeal(CopperGolem copper) {
+        org.bukkit.inventory.EntityEquipment equipment = copper.getEquipment();
+        if (equipment == null) {
+            return;
+        }
+        ItemStack current = equipment.getItemInMainHand();
+        if (current != null && !current.isEmpty() && current.getType() == Material.BONE_MEAL) {
+            equipment.setItemInMainHandDropChance(0.0F);
+            return;
+        }
+        equipment.setItemInMainHand(new ItemStack(Material.BONE_MEAL), true);
+        equipment.setItemInMainHandDropChance(0.0F);
+    }
+
     public Location farthestPlot(SoulGolemData data, List<Block> blocks) {
         Block block = this.farmAreaService.pickFarthestFromChest(blocks, data);
         return block == null ? null : block.getLocation();
@@ -307,7 +321,7 @@ public final class FarmerContext {
 
     public List<Block> immatureBoneMealCrops(SoulGolemData data) {
         int radius = this.chestService.effectiveRadius(data);
-        return this.farmAreaService.immatureCrops(data, radius, enabledCrops());
+        return this.farmAreaService.boneMealCrops(data, radius, enabledCrops());
     }
 
     public boolean hasBoneMealWork(ActiveGolem golem) {

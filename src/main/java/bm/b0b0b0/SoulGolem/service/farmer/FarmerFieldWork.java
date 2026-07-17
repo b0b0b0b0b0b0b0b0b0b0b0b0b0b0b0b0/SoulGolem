@@ -243,14 +243,16 @@ public final class FarmerFieldWork {
             this.support.continueSeat(golem, copper);
             return;
         }
-        if (this.ctx.farmAreaService().hasValidSeat(golem.data())) {
-            golem.wanderTarget(null);
-            golem.farmerState(FarmerState.MOVING_TO_SEAT);
-            this.support.continueSeat(golem, copper);
-            return;
-        }
         if (this.cycle.assignNextJob(golem)) {
             golem.wanderTarget(null);
+            return;
+        }
+        if (this.ctx.farmAreaService().hasValidSeat(golem.data())) {
+            golem.wanderTarget(null);
+            if (golem.farmerState() != FarmerState.SITTING) {
+                golem.farmerState(FarmerState.MOVING_TO_SEAT);
+            }
+            this.support.continueSeat(golem, copper);
             return;
         }
         if (!golem.carried().isEmpty() && this.ctx.chestService().hasSpace(golem.data())) {
@@ -369,21 +371,23 @@ public final class FarmerFieldWork {
         CropType cropType = CropType.byCrop(crop.getType());
         if (cropType == null
                 || !this.ctx.enabledCrops().contains(cropType)
-                || !(crop.getBlockData() instanceof org.bukkit.block.data.Ageable ageableCrop)) {
+                || !(crop.getBlockData() instanceof org.bukkit.block.data.Ageable ageableCrop)
+                || ageableCrop.getAge() >= ageableCrop.getMaximumAge()) {
+            if (cropType != null
+                    && this.ctx.enabledCrops().contains(cropType)
+                    && crop.getBlockData() instanceof org.bukkit.block.data.Ageable mature
+                    && mature.getAge() >= mature.getMaximumAge()) {
+                golem.armHarvestNotice(this.ctx.settings().farmer.harvestNoticeTicks);
+            }
             golem.targetCrop(null);
-            List<Block> left = this.ctx.immatureBoneMealCrops(golem.data());
-            if (!left.isEmpty()) {
-                golem.targetCrop(this.ctx.boneMealPlot(golem.data(), left));
-                golem.farmerState(FarmerState.MOVING_TO_BONEMEAL);
+            if (retargetBoneMeal(golem)) {
                 return;
             }
             this.carried.returnCarriedToChest(golem, Material.BONE_MEAL);
+            if (this.cycle.assignNextJob(golem)) {
+                return;
+            }
             golem.farmerState(FarmerState.WAIT_GROWTH);
-            return;
-        }
-        if (ageableCrop.getAge() >= ageableCrop.getMaximumAge()) {
-            golem.targetCrop(crop.getLocation());
-            golem.farmerState(FarmerState.MOVING_TO_HARVEST);
             return;
         }
         Location stand = crop.getLocation().add(0.5D, 0.0D, 0.5D);
@@ -396,31 +400,22 @@ public final class FarmerFieldWork {
         golem.farmerState(FarmerState.APPLYING_BONEMEAL);
         GolemGaze.faceBlock(golem, crop);
 
-        int ageBefore = 0;
-        if (crop.getBlockData() instanceof org.bukkit.block.data.Ageable ageable) {
-            ageBefore = ageable.getAge();
-        }
-        crop.applyBoneMeal(org.bukkit.block.BlockFace.UP);
-        boolean grew = false;
-        if (crop.getBlockData() instanceof org.bukkit.block.data.Ageable after) {
-            grew = after.getAge() > ageBefore;
-        }
-        if (grew) {
+        boolean applied = crop.applyBoneMeal(org.bukkit.block.BlockFace.UP);
+        if (applied) {
             FarmerCarried.consumeCarried(golem, Material.BONE_MEAL, 1);
+            golem.armHarvestNotice(this.ctx.settings().farmer.harvestNoticeTicks);
         } else {
-            this.carried.returnCarriedToChest(golem, Material.BONE_MEAL);
             golem.targetCrop(null);
+            if (retargetBoneMeal(golem)) {
+                return;
+            }
+            this.carried.returnCarriedToChest(golem, Material.BONE_MEAL);
             golem.farmerState(FarmerState.WAIT_GROWTH);
             golem.data().lastActionAt(System.currentTimeMillis());
             return;
         }
         golem.markDirty();
 
-        if (crop.getBlockData() instanceof org.bukkit.block.data.Ageable done && done.getAge() >= done.getMaximumAge()) {
-            golem.targetCrop(crop.getLocation());
-            golem.farmerState(FarmerState.MOVING_TO_HARVEST);
-            return;
-        }
         if (FarmerCarried.countCarried(golem, Material.BONE_MEAL) > 0) {
             if (this.ctx.hasPlantWork(golem)) {
                 this.carried.returnCarriedToChest(golem, Material.BONE_MEAL);
@@ -429,11 +424,9 @@ public final class FarmerFieldWork {
                     return;
                 }
             }
-            List<Block> stillGrowing = this.ctx.immatureBoneMealCrops(golem.data());
-            Location next = this.ctx.boneMealPlot(golem.data(), stillGrowing);
-            golem.targetCrop(next != null ? next : crop.getLocation());
-            golem.farmerState(FarmerState.MOVING_TO_BONEMEAL);
-            return;
+            if (retargetBoneMeal(golem)) {
+                return;
+            }
         }
         if (this.cycle.assignNextJob(golem)) {
             return;
@@ -441,6 +434,23 @@ public final class FarmerFieldWork {
         golem.targetCrop(null);
         golem.farmerState(FarmerState.WAIT_GROWTH);
         golem.data().lastActionAt(System.currentTimeMillis());
+    }
+
+    private boolean retargetBoneMeal(ActiveGolem golem) {
+        if (FarmerCarried.countCarried(golem, Material.BONE_MEAL) <= 0) {
+            return false;
+        }
+        List<Block> left = this.ctx.immatureBoneMealCrops(golem.data());
+        if (left.isEmpty()) {
+            return false;
+        }
+        Location next = this.ctx.boneMealPlot(golem.data(), left);
+        if (next == null) {
+            return false;
+        }
+        golem.targetCrop(next);
+        golem.farmerState(FarmerState.MOVING_TO_BONEMEAL);
+        return true;
     }
 
     private void approachChestForBoneMeal(ActiveGolem golem, CopperGolem copper) {

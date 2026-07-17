@@ -365,7 +365,7 @@ public final class MinerSupportWork {
 
     public static boolean isClearableJunk(Block block) {
         Material type = block.getType();
-        if (type.isAir() || SoulChestService.isChestLike(type) || type == Material.CRAFTING_TABLE
+        if (type.isAir() || SoulChestService.isChestLike(type) || type == Material.CRAFTING_TABLE || type == Material.COMPOSTER
                 || type == Material.FURNACE || type == Material.BLAST_FURNACE || type == Material.SMOKER) {
             return false;
         }
