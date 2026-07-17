@@ -3,6 +3,7 @@ package bm.b0b0b0.SoulGolem.service;
 import bm.b0b0b0.SoulGolem.config.settings.Settings;
 import bm.b0b0b0.SoulGolem.model.ActiveGolem;
 import bm.b0b0b0.SoulGolem.model.SoulGolemData;
+import com.destroystokyo.paper.entity.Pathfinder;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.Tag;
@@ -11,6 +12,9 @@ import org.bukkit.entity.CopperGolem;
 import org.bukkit.util.Vector;
 
 public final class GolemMovement {
+
+    private static final double ARRIVE_SQ = 0.36D;
+    private static final double SAME_GOAL_SQ = 1.21D;
 
     private final Settings settings;
     private final SoulChestService chestService;
@@ -50,19 +54,21 @@ public final class GolemMovement {
             }
         }
 
-        if (horizontalDistanceSquared(from, goal) < 0.36D
+        if (horizontalDistanceSquared(from, goal) < ARRIVE_SQ
                 && Math.abs(from.getY() - goal.getY()) < 1.25D) {
             stop(copper);
             return;
         }
 
-        double moodSpeed = 1.0D;
-        if (golem != null && this.farmAreaService != null) {
-            int radius = this.chestService.effectiveRadius(data);
-            int mood = this.farmAreaService.moodScore(data, radius);
-            moodSpeed = this.settings.moodWorkSpeedAt(mood);
+        double speed = Math.max(1.0D, this.settings.walkSpeed);
+        if (golem != null) {
+            Location look = target.clone();
+            look.setY(look.getY() + 0.9D);
+            GolemGaze.face(golem, look);
         }
-        double speed = Math.max(0.35D, this.settings.walkSpeed * Math.max(0.1D, moodSpeed));
+        if (alreadyPathingTo(copper, goal)) {
+            return;
+        }
         copper.getPathfinder().moveTo(goal, speed);
     }
 
@@ -73,6 +79,22 @@ public final class GolemMovement {
         copper.getPathfinder().stopPathfinding();
         Vector velocity = copper.getVelocity();
         copper.setVelocity(new Vector(0.0D, velocity.getY(), 0.0D));
+    }
+
+    private static boolean alreadyPathingTo(CopperGolem copper, Location goal) {
+        Pathfinder pathfinder = copper.getPathfinder();
+        if (!pathfinder.hasPath()) {
+            return false;
+        }
+        Pathfinder.PathResult path = pathfinder.getCurrentPath();
+        if (path == null) {
+            return false;
+        }
+        Location finalPoint = path.getFinalPoint();
+        return finalPoint != null
+                && finalPoint.getWorld() != null
+                && finalPoint.getWorld().equals(goal.getWorld())
+                && horizontalDistanceSquared(finalPoint, goal) <= SAME_GOAL_SQ;
     }
 
     private Location resolveGoal(Location from, Location target, SoulGolemData data, ActiveGolem golem) {

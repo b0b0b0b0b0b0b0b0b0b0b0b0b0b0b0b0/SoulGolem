@@ -2,6 +2,7 @@ package bm.b0b0b0.SoulGolem.service;
 
 import bm.b0b0b0.SoulGolem.config.ConfigurationLoader;
 import bm.b0b0b0.SoulGolem.config.settings.Settings;
+import bm.b0b0b0.SoulGolem.model.ActiveGolem;
 import bm.b0b0b0.SoulGolem.model.CropType;
 import bm.b0b0b0.SoulGolem.model.GolemType;
 import bm.b0b0b0.SoulGolem.model.SoulGolemData;
@@ -543,6 +544,11 @@ public final class FarmAreaService {
         return list;
     }
 
+    public boolean hasFieldCrops(SoulGolemData data, int radius, Collection<CropType> crops) {
+        return !immatureCrops(data, radius, crops).isEmpty()
+                || !matureCrops(data, radius, crops).isEmpty();
+    }
+
     public int moodScore(SoulGolemData data, int radius) {
         Settings settings = this.configurationLoader.config().settings();
         int score = 0;
@@ -804,6 +810,9 @@ public final class FarmAreaService {
             return;
         }
         Material type = block.getType();
+        if (Tag.STAIRS.isTagged(type)) {
+            return;
+        }
         if (type == fence || Tag.FENCES.isTagged(type) || type == gate || Tag.FENCE_GATES.isTagged(type)) {
             return;
         }
@@ -989,12 +998,14 @@ public final class FarmAreaService {
         if (SoulChestService.isChestLike(spot.getType()) || spot.getType() == Material.CRAFTING_TABLE) {
             return;
         }
+        if (Tag.STAIRS.isTagged(spot.getType())) {
+            return;
+        }
         if (spot.getType() == fence || Tag.FENCES.isTagged(spot.getType())) {
             protect(spot, golemId);
             refreshFenceConnections(spot);
             return;
         }
-        // Нижняя шерсть навеса → забор.
         BlockPos pos = BlockPos.of(spot);
         this.originals.putIfAbsent(pos, spot.getType());
         spot.setType(fence, true);
@@ -1319,16 +1330,172 @@ public final class FarmAreaService {
         return spot.getLocation().add(0.5D, 0.0D, 0.5D);
     }
 
-    public boolean hasValidSeat(SoulGolemData data) {
-        if (!data.hasSeat()) {
-            return false;
+    public Location standBesideInside(SoulGolemData data, Block spot) {
+        if (spot == null || spot.getWorld() == null) {
+            return null;
         }
-        Block seat = seatBlock(data);
-        if (seat != null && Tag.STAIRS.isTagged(seat.getType())) {
+        int[][] offsets = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}, {1, 1}, {1, -1}, {-1, 1}, {-1, -1}};
+        Location best = null;
+        double bestDist = Double.MAX_VALUE;
+        for (int[] o : offsets) {
+            Block at = spot.getRelative(o[0], 0, o[1]);
+            Block below = at.getRelative(BlockFace.DOWN);
+            if (SoulChestService.isChestLike(at.getType()) || at.getType() == Material.CRAFTING_TABLE) {
+                continue;
+            }
+            if (!(below.getType().isSolid() || below.getType() == Material.FARMLAND)) {
+                continue;
+            }
+            if (at.getType().isSolid() && !isVegetation(at.getType()) && !isAnyCrop(at.getType())) {
+                continue;
+            }
+            Location cand = at.getLocation().add(0.5D, 0.0D, 0.5D);
+            if (!insideWoolBorder(data, cand)) {
+                continue;
+            }
+            double dist = GolemMovement.horizontalDistanceSquared(cand, spot.getLocation().add(0.5D, 0.0D, 0.5D));
+            if (dist < bestDist) {
+                bestDist = dist;
+                best = cand;
+            }
+        }
+        if (best != null) {
+            return best;
+        }
+        Location onSpot = spot.getLocation().add(0.5D, 0.0D, 0.5D);
+        if (insideWoolBorder(data, onSpot)) {
+            return onSpot;
+        }
+        return standBeside(spot);
+    }
+
+    public boolean insideWoolBorder(SoulGolemData data, Location location) {
+        if (data == null || location == null || location.getWorld() == null) {
             return true;
         }
-        data.clearSeatPosition();
+        if (!location.getWorld().getName().equals(data.worldName())) {
+            return false;
+        }
+        int r = Math.max(1, this.chestService.effectiveRadius(data));
+        int hx = (int) Math.floor(data.homeX());
+        int hz = (int) Math.floor(data.homeZ());
+        return Math.abs(location.getBlockX() - hx) <= r
+                && Math.abs(location.getBlockZ() - hz) <= r;
+    }
+
+    public boolean ensureInsideBorder(ActiveGolem golem, CopperGolem copper, GolemMovement movement) {
+        if (golem == null || copper == null || !copper.isValid()) {
+            return true;
+        }
+        Location at = copper.getLocation();
+        if (isSeatedOnOwnBench(at, golem.data()) || insideWoolBorder(golem.data(), at)) {
+            return true;
+        }
+        Location safe = safeStandNearHome(golem.data());
+        if (safe == null) {
+            return true;
+        }
+        golem.wanderTarget(null);
+        if (GolemMovement.horizontalDistanceSquared(at, safe) > 25.0D) {
+            movement.stop(copper);
+            copper.teleport(safe);
+            return true;
+        }
+        movement.walkTowards(copper, safe, golem);
         return false;
+    }
+
+    public boolean hasValidSeat(SoulGolemData data) {
+        if (data.hasSeat()) {
+            Block seat = seatBlock(data);
+            if (seat != null && Tag.STAIRS.isTagged(seat.getType())) {
+                return true;
+            }
+            data.clearSeatPosition();
+        }
+        return reclaimSeatOnBorder(data);
+    }
+
+    public boolean reclaimSeatOnBorder(SoulGolemData data) {
+        Block found = findExistingSeatStairs(data, this.chestService.effectiveRadius(data));
+        if (found == null) {
+            return false;
+        }
+        data.seatPosition(found.getX(), found.getY(), found.getZ());
+        protect(found, data.id());
+        return true;
+    }
+
+    public Block findExistingSeatStairs(SoulGolemData data, int radius) {
+        World world = Bukkit.getWorld(data.worldName());
+        if (world == null) {
+            return null;
+        }
+        int homeX = (int) Math.floor(data.homeX());
+        int homeY = (int) Math.floor(data.homeY());
+        int homeZ = (int) Math.floor(data.homeZ());
+        int r = Math.max(1, radius);
+        Block best = null;
+        double bestDist = -1.0D;
+        int cx = (int) Math.floor(data.chestX());
+        int cz = (int) Math.floor(data.chestZ());
+        for (int x = homeX - r; x <= homeX + r; x++) {
+            best = fartherSeatStairs(best, bestDist, world.getBlockAt(x, homeY + 1, homeZ - r), cx, cz);
+            if (best != null) {
+                bestDist = horizontalDist(best, cx, cz);
+            }
+            best = fartherSeatStairs(best, bestDist, world.getBlockAt(x, homeY + 1, homeZ + r), cx, cz);
+            if (best != null) {
+                bestDist = horizontalDist(best, cx, cz);
+            }
+        }
+        for (int z = homeZ - r + 1; z <= homeZ + r - 1; z++) {
+            best = fartherSeatStairs(best, bestDist, world.getBlockAt(homeX - r, homeY + 1, z), cx, cz);
+            if (best != null) {
+                bestDist = horizontalDist(best, cx, cz);
+            }
+            best = fartherSeatStairs(best, bestDist, world.getBlockAt(homeX + r, homeY + 1, z), cx, cz);
+            if (best != null) {
+                bestDist = horizontalDist(best, cx, cz);
+            }
+        }
+        if (best != null) {
+            return best;
+        }
+        for (int dy = 0; dy <= 2; dy++) {
+            for (int x = homeX - r; x <= homeX + r; x++) {
+                best = fartherSeatStairs(best, bestDist, world.getBlockAt(x, homeY + dy, homeZ - r), cx, cz);
+                if (best != null) {
+                    bestDist = horizontalDist(best, cx, cz);
+                }
+                best = fartherSeatStairs(best, bestDist, world.getBlockAt(x, homeY + dy, homeZ + r), cx, cz);
+                if (best != null) {
+                    bestDist = horizontalDist(best, cx, cz);
+                }
+            }
+            for (int z = homeZ - r + 1; z <= homeZ + r - 1; z++) {
+                best = fartherSeatStairs(best, bestDist, world.getBlockAt(homeX - r, homeY + dy, z), cx, cz);
+                if (best != null) {
+                    bestDist = horizontalDist(best, cx, cz);
+                }
+                best = fartherSeatStairs(best, bestDist, world.getBlockAt(homeX + r, homeY + dy, z), cx, cz);
+                if (best != null) {
+                    bestDist = horizontalDist(best, cx, cz);
+                }
+            }
+        }
+        return best;
+    }
+
+    private static Block fartherSeatStairs(Block current, double currentDist, Block candidate, int cx, int cz) {
+        if (candidate == null || !Tag.STAIRS.isTagged(candidate.getType())) {
+            return current;
+        }
+        double dist = horizontalDist(candidate, cx, cz);
+        if (current == null || dist > currentDist) {
+            return candidate;
+        }
+        return current;
     }
 
     public Block seatBlock(SoulGolemData data) {
@@ -1351,7 +1518,22 @@ public final class FarmAreaService {
         if (seat == null) {
             return null;
         }
-        return seat.getLocation().add(0.5D, 0.55D, 0.5D);
+        double ox = 0.5D;
+        double oy = 0.5D;
+        double oz = 0.5D;
+        if (seat.getBlockData() instanceof org.bukkit.block.data.type.Stairs stairs) {
+            BlockFace back = stairs.getFacing().getOppositeFace();
+            ox += back.getModX() * 0.2D;
+            oz += back.getModZ() * 0.2D;
+        }
+        return seat.getLocation().add(ox, oy, oz);
+    }
+
+    public void debugSeat(String message) {
+        if (!settings().debugSeat) {
+            return;
+        }
+        Bukkit.getLogger().info("[SoulGolem:seat] " + message);
     }
 
     public boolean isSeatedOnOwnBench(Location location, SoulGolemData data) {
@@ -1366,7 +1548,7 @@ public final class FarmAreaService {
             return false;
         }
         double y = location.getY();
-        return y >= seat.getY() + 0.4D && y < seat.getY() + 1.6D;
+        return y >= seat.getY() + 0.35D && y < seat.getY() + 1.75D;
     }
 
     public boolean placeSeat(SoulGolemData data, Block spot, Material stairs, UUID golemId) {
@@ -1497,7 +1679,6 @@ public final class FarmAreaService {
         if (world == null) {
             return null;
         }
-        // Центр поля под открытым небом — не колонка навеса над ступенькой.
         return new Location(world, data.homeX(), Math.floor(data.homeY()) + 2.0D, data.homeZ());
     }
 
@@ -1511,7 +1692,6 @@ public final class FarmAreaService {
         int ax = anchor.getX();
         int ay = anchor.getY();
         int az = anchor.getZ();
-        // 1 шерсть над NPC на +3
         list.add(world.getBlockAt(ax, ay + 3, az));
 
         int[] corner = rainShelterFenceCorner(data, anchor);
@@ -1525,7 +1705,6 @@ public final class FarmAreaService {
         Block base = world.getBlockAt(cx, baseY, cz);
         boolean fenceAtBase = isFenceOrGate(base.getType(), data);
 
-        // В углу всего 4 «этажа»: забор + 3 шерсти, либо 4 шерсти (низ потом станет забором).
         int from = fenceAtBase ? 1 : 0;
         int to = 3;
         for (int dy = from; dy <= to; dy++) {
@@ -1534,9 +1713,6 @@ public final class FarmAreaService {
         return list;
     }
 
-    /**
-     * Угол внешнего заборного кольца (radius+1), ближайший к ступеньке / якорю навеса.
-     */
     private int[] rainShelterFenceCorner(SoulGolemData data, Block anchor) {
         int radius = this.chestService.effectiveRadius(data);
         int fr = Math.max(1, radius) + 1;
@@ -1758,7 +1934,7 @@ public final class FarmAreaService {
         int homeY = (int) Math.floor(data.homeY());
         int homeZ = (int) Math.floor(data.homeZ());
         java.util.concurrent.ThreadLocalRandom random = java.util.concurrent.ThreadLocalRandom.current();
-        int max = Math.max(1, radius - 1);
+        int max = Math.max(1, Math.max(1, radius) - 2);
         for (int attempt = 0; attempt < 16; attempt++) {
             int x = homeX + random.nextInt(-max, max + 1);
             int z = homeZ + random.nextInt(-max, max + 1);

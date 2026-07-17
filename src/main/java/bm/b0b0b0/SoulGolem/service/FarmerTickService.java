@@ -140,8 +140,17 @@ public final class FarmerTickService {
             return;
         }
 
-        GolemSpawnService.applySoulEntityFlags(copper, data.type());
+        this.context.spawnService().refreshSoulEntity(copper, data.type());
         FarmerState state = golem.farmerState();
+        GolemAiMode.sync(
+                this.context.plugin(),
+                copper,
+                golem,
+                this.context.registry(),
+                this.context.keys(),
+                this.context.movement()
+        );
+        GolemGaze.dropPlayerGazeUnlessSitting(golem, state == FarmerState.SITTING);
         if (data.paused() || isStandingWork(state)) {
             this.context.movement().stop(copper);
         }
@@ -177,6 +186,9 @@ public final class FarmerTickService {
                 || state == FarmerState.MOVING_TO_CRAFT;
         if (!workingMove
                 && state != FarmerState.WAITING_SEEDS
+                && state != FarmerState.SITTING
+                && state != FarmerState.MOVING_TO_SEAT
+                && state != FarmerState.PLACING_SEAT
                 && this.context.farmAreaService().needsRescue(copper.getLocation(), data)) {
             Location safe = this.context.farmAreaService().safeStandNearHome(data);
             if (safe != null) {
@@ -220,6 +232,24 @@ public final class FarmerTickService {
                 return;
             }
             if (this.context.gateWatch().shouldStartClose(golem, true, farmer.gateCloseDelayMs)) {
+                if (state == FarmerState.SITTING
+                        || state == FarmerState.MOVING_TO_SEAT
+                        || state == FarmerState.PLACING_SEAT) {
+                    this.context.seatWork().leaveBench(
+                            golem,
+                            copper,
+                            this.context.plugin(),
+                            this.context.registry(),
+                            this.context.keys()
+                    );
+                } else if (state == FarmerState.SHELTERING || state == FarmerState.RESTING) {
+                    GolemAiMode.enable(
+                            this.context.plugin(),
+                            copper,
+                            this.context.registry(),
+                            this.context.keys()
+                    );
+                }
                 golem.clearFetchFlags();
                 golem.wanderTarget(null);
                 golem.farmerState(FarmerState.MOVING_TO_CLOSE_GATE);
@@ -279,6 +309,7 @@ public final class FarmerTickService {
             case MOVING_TO_COMBAT, COMBATING -> this.context.combat().continueCombat(golem, copper);
             default -> golem.farmerState(FarmerState.WAITING_SEEDS);
         }
+        GolemGazeService.forceLook(copper, golem);
         GolemDisplay.refresh(golem, copper, this.context.messages(), this.context.keys(), style);
     }
 

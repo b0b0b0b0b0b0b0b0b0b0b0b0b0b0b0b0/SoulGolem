@@ -3,13 +3,10 @@ package bm.b0b0b0.SoulGolem.service;
 import bm.b0b0b0.SoulGolem.config.PluginConfig;
 import bm.b0b0b0.SoulGolem.config.settings.Settings;
 import bm.b0b0b0.SoulGolem.model.SoulGolemData;
-import bm.b0b0b0.SoulGolem.scheduler.PluginSchedulers;
 import bm.b0b0b0.SoulGolem.util.PluginKeys;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.bukkit.Bukkit;
@@ -19,7 +16,6 @@ import org.bukkit.Tag;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.block.Chest;
-import org.bukkit.block.Lidded;
 import org.bukkit.block.TileState;
 import org.bukkit.block.data.BlockData;
 import org.bukkit.block.data.Directional;
@@ -32,12 +28,11 @@ import org.bukkit.plugin.Plugin;
 public final class SoulChestService {
 
     private static final MiniMessage MINI = MiniMessage.miniMessage();
-    private static final long LID_CLOSE_DELAY_TICKS = 15L;
 
     private final Plugin plugin;
     private final PluginKeys keys;
     private final PluginConfig config;
-    private final Map<UUID, Integer> lidCloseEpoch = new ConcurrentHashMap<>();
+    private final SoulChestLid lid;
     private String chestNameRaw;
     private String craftNameRaw;
 
@@ -47,6 +42,11 @@ public final class SoulChestService {
         this.config = config;
         this.chestNameRaw = chestNameRaw;
         this.craftNameRaw = craftNameRaw;
+        this.lid = new SoulChestLid(plugin, this::chestAt);
+    }
+
+    public SoulChestLid lid() {
+        return this.lid;
     }
 
     public void updateStationNames(String chestNameRaw, String craftNameRaw) {
@@ -330,42 +330,15 @@ public final class SoulChestService {
     }
 
     public void openLid(SoulGolemData data) {
-        if (!(chestAt(data) instanceof Lidded lidded)) {
-            return;
-        }
-        if (!lidded.isOpen()) {
-            lidded.open();
-        }
+        this.lid.open(data);
     }
 
     public void closeLid(SoulGolemData data) {
-        this.lidCloseEpoch.merge(data.id(), 1, Integer::sum);
-        closeLidNow(data);
+        this.lid.closeNow(data);
     }
 
     public void scheduleCloseLid(SoulGolemData data) {
-        Chest chest = chestAt(data);
-        if (chest == null) {
-            return;
-        }
-        UUID golemId = data.id();
-        int epoch = this.lidCloseEpoch.getOrDefault(golemId, 0);
-        Location loc = chest.getLocation();
-        PluginSchedulers.runAtLater(this.plugin, loc, () -> {
-            if (this.lidCloseEpoch.getOrDefault(golemId, 0) != epoch) {
-                return;
-            }
-            closeLidNow(data);
-        }, LID_CLOSE_DELAY_TICKS);
-    }
-
-    private void closeLidNow(SoulGolemData data) {
-        if (!(chestAt(data) instanceof Lidded lidded)) {
-            return;
-        }
-        if (lidded.isOpen()) {
-            lidded.close();
-        }
+        this.lid.closeLater(data);
     }
 
     public void placeCraftingTable(Location location, UUID golemId, UUID ownerUuid) {

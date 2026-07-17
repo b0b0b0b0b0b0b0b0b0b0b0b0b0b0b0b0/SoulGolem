@@ -2,7 +2,9 @@ package bm.b0b0b0.SoulGolem.service.farmer;
 
 import bm.b0b0b0.SoulGolem.model.ActiveGolem;
 import bm.b0b0b0.SoulGolem.model.FarmerState;
+import bm.b0b0b0.SoulGolem.service.GolemGaze;
 import bm.b0b0b0.SoulGolem.service.GolemMovement;
+import bm.b0b0b0.SoulGolem.service.SoulChestLid;
 import java.util.ArrayList;
 import java.util.List;
 import org.bukkit.Location;
@@ -28,15 +30,19 @@ public final class FarmerChestWork {
         this.support = support;
     }
 
+    private SoulChestLid lid() {
+        return this.ctx.chestService().lid();
+    }
+
     public void continueDeposit(ActiveGolem golem, CopperGolem copper) {
         Location chestStand = this.ctx.chestService().chestStandLocation(golem.data());
         if (chestStand == null) {
-            this.ctx.chestService().closeLid(golem.data());
+            lid().closeNow(golem.data());
             golem.farmerState(FarmerState.WAITING_SEEDS);
             return;
         }
         if (GolemMovement.horizontalDistanceSquared(copper.getLocation(), chestStand) > 1.69D) {
-            this.ctx.chestService().closeLid(golem.data());
+            lid().closeNow(golem.data());
             this.ctx.movement().walkTowards(copper, chestStand, golem);
             return;
         }
@@ -48,60 +54,60 @@ public final class FarmerChestWork {
                 golem.data().chestY() + 0.5D,
                 golem.data().chestZ() + 0.5D
         );
-        copper.lookAt(chestLook);
-        this.ctx.chestService().openLid(golem.data());
+        GolemGaze.face(golem, chestLook);
+        lid().open(golem.data());
 
         if (golem.fetchingSeed()) {
             this.field.takeSeedFromChest(golem);
-            this.ctx.chestService().scheduleCloseLid(golem.data());
+            lid().closeLater(golem.data());
             return;
         }
         if (golem.fetchingFeed()) {
             this.ctx.eatFeedFromChest(golem);
-            this.ctx.chestService().scheduleCloseLid(golem.data());
+            lid().closeLater(golem.data());
             return;
         }
         if (golem.fetchingSeat()) {
             this.support.takeSeatFromChest(golem);
-            this.ctx.chestService().scheduleCloseLid(golem.data());
+            lid().closeLater(golem.data());
             return;
         }
         if (golem.fetchingTorch()) {
             this.support.takeTorchesFromChest(golem);
-            this.ctx.chestService().scheduleCloseLid(golem.data());
+            lid().closeLater(golem.data());
             return;
         }
         if (golem.fetchingFence() || golem.fetchingGate()) {
             this.support.takeFenceFromChest(golem);
-            this.ctx.chestService().scheduleCloseLid(golem.data());
+            lid().closeLater(golem.data());
             return;
         }
         if (golem.fetchingBoneMeal()) {
             this.field.takeBoneMealFromChest(golem);
-            this.ctx.chestService().scheduleCloseLid(golem.data());
+            lid().closeLater(golem.data());
             return;
         }
         if (golem.fetchingWeapon()) {
             this.ctx.combat().takeWeaponFromChest(golem, copper);
-            this.ctx.chestService().scheduleCloseLid(golem.data());
+            lid().closeLater(golem.data());
             return;
         }
 
         if (!this.ctx.hasPlantWork(golem)
                 && this.ctx.hasBoneMealWork(golem)
                 && FarmerCarried.countCarried(golem, Material.BONE_MEAL) > 0) {
-            this.ctx.chestService().scheduleCloseLid(golem.data());
+            lid().closeLater(golem.data());
             golem.farmerState(FarmerState.MOVING_TO_BONEMEAL);
             return;
         }
 
         if (golem.carried().isEmpty()) {
-            this.ctx.chestService().scheduleCloseLid(golem.data());
-            this.cycle.afterDeposit(golem);
+            lid().closeLater(golem.data());
+            this.cycle.afterDeposit(golem, copper);
             return;
         }
         if (!this.ctx.chestService().hasSpace(golem.data())) {
-            this.ctx.chestService().scheduleCloseLid(golem.data());
+            lid().closeLater(golem.data());
             golem.farmerState(FarmerState.WAITING_CHEST);
             this.ctx.notifyChestFull(golem);
             return;
@@ -118,13 +124,13 @@ public final class FarmerChestWork {
         for (ItemStack stack : leftover) {
             golem.carry(stack);
         }
-        this.ctx.chestService().scheduleCloseLid(golem.data());
+        lid().closeLater(golem.data());
         if (!depositedAll) {
             golem.farmerState(FarmerState.WAITING_CHEST);
             this.ctx.notifyChestFull(golem);
             return;
         }
-        this.cycle.afterDeposit(golem);
+        this.cycle.afterDeposit(golem, copper);
     }
 
     public void continueCraft(ActiveGolem golem, CopperGolem copper) {
@@ -149,16 +155,20 @@ public final class FarmerChestWork {
         if (toTable > 2.25D) {
             copper.teleport(craftStand);
         }
+        this.ctx.movement().stop(copper);
         copper.setVelocity(new Vector(0, 0, 0));
         golem.farmerState(FarmerState.CRAFTING);
-        while (this.ctx.settings().farmer.craftBread
-                && this.ctx.chestService().countItem(golem.data(), Material.WHEAT) >= 3
-                && this.ctx.chestService().hasSpace(golem.data())) {
-            if (!this.ctx.chestService().craftBread(golem.data())) {
-                break;
+        GolemGaze.face(golem, craftBlock.clone().add(0.0D, 0.5D, 0.0D));
+        lid().run(golem.data(), () -> {
+            while (this.ctx.settings().farmer.craftBread
+                    && this.ctx.chestService().countItem(golem.data(), Material.WHEAT) >= 3
+                    && this.ctx.chestService().hasSpace(golem.data())) {
+                if (!this.ctx.chestService().craftBread(golem.data())) {
+                    break;
+                }
             }
-        }
+        });
         golem.markDirty();
-        this.cycle.afterDeposit(golem);
+        this.cycle.afterDeposit(golem, copper);
     }
 }

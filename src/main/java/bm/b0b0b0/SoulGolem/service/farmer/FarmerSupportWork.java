@@ -2,10 +2,13 @@ package bm.b0b0b0.SoulGolem.service.farmer;
 
 import bm.b0b0b0.SoulGolem.model.ActiveGolem;
 import bm.b0b0b0.SoulGolem.model.FarmerState;
+import bm.b0b0b0.SoulGolem.config.settings.Settings;
 import bm.b0b0b0.SoulGolem.service.FarmAreaService;
+import bm.b0b0b0.SoulGolem.service.GolemAiMode;
 import bm.b0b0b0.SoulGolem.service.GolemControlService;
 import bm.b0b0b0.SoulGolem.service.GolemFenceWork;
 import bm.b0b0b0.SoulGolem.service.GolemGateWatch;
+import bm.b0b0b0.SoulGolem.service.GolemGaze;
 import bm.b0b0b0.SoulGolem.service.GolemGroundLootWork;
 import bm.b0b0b0.SoulGolem.service.GolemMovement;
 import bm.b0b0b0.SoulGolem.service.GolemRainShelterWork;
@@ -73,6 +76,7 @@ public final class FarmerSupportWork {
         }
         copper.setVelocity(new Vector(0, 0, 0));
         golem.farmerState(FarmerState.CLEARING);
+        GolemGaze.faceBlock(golem, junk);
         if (FarmAreaService.isVegetation(junk.getType())) {
             FarmAreaService.clearVegetation(junk);
         } else {
@@ -161,7 +165,7 @@ public final class FarmerSupportWork {
     }
 
     public void continueShelter(ActiveGolem golem, CopperGolem copper) {
-        applyShelterPhase(golem, this.ctx.rainShelter().tick(
+        applyShelterPhase(golem, copper, this.ctx.rainShelter().tick(
                 golem,
                 copper,
                 this.ctx.settings().farmer.rainShelter
@@ -187,7 +191,7 @@ public final class FarmerSupportWork {
         }
     }
 
-    private void applyShelterPhase(ActiveGolem golem, GolemRainShelterWork.Phase phase) {
+    private void applyShelterPhase(ActiveGolem golem, CopperGolem copper, GolemRainShelterWork.Phase phase) {
         switch (phase) {
             case MOVING -> golem.farmerState(FarmerState.MOVING_TO_SHELTER);
             case BUILDING -> golem.farmerState(FarmerState.BUILDING_SHELTER);
@@ -197,6 +201,12 @@ public final class FarmerSupportWork {
                 if (this.ctx.rainShelter().isStorming(golem.data())) {
                     golem.farmerState(FarmerState.SHELTERING);
                 } else {
+                    GolemAiMode.enable(
+                            this.ctx.plugin(),
+                            copper,
+                            this.ctx.registry(),
+                            this.ctx.keys()
+                    );
                     this.cycle.resumeAfterClear(golem);
                 }
             }
@@ -207,57 +217,91 @@ public final class FarmerSupportWork {
         if (!this.ctx.stationsOk(golem)) {
             return;
         }
-        if (this.cycle.tryPrioritizeFence(golem)) {
+
+        if (golem.farmerState() == FarmerState.SITTING
+                && this.ctx.farmAreaService().hasValidSeat(golem.data())) {
+            if (shouldLeaveSeat(golem)) {
+                golem.wanderTarget(null);
+                this.ctx.seatWork().leaveBench(
+                        golem,
+                        copper,
+                        this.ctx.plugin(),
+                        this.ctx.registry(),
+                        this.ctx.keys()
+                );
+                if (this.cycle.tryPrioritizeFence(golem)) {
+                    return;
+                }
+                if (this.cycle.assignNextJob(golem)) {
+                    return;
+                }
+                golem.farmerState(FarmerState.WAIT_GROWTH);
+                return;
+            }
+            this.ctx.seatWork().holdOnBench(golem, copper);
             return;
         }
-        int radius = this.ctx.chestService().effectiveRadius(golem.data());
 
+        if (!this.ctx.farmAreaService().ensureInsideBorder(golem, copper, this.ctx.movement())) {
+            return;
+        }
+
+        int radius = this.ctx.chestService().effectiveRadius(golem.data());
         Material carriedStairs = FarmerCarried.carriedStairs(golem);
         if (carriedStairs != null && !this.ctx.farmAreaService().hasValidSeat(golem.data())) {
             applySeatPhase(golem, this.ctx.seatWork().placeCarriedSeat(golem, copper, carriedStairs, radius));
             return;
         }
 
-        if (this.cycle.assignNextJob(golem)) {
-            return;
-        }
-
-        if (!golem.carried().isEmpty() && this.ctx.chestService().hasSpace(golem.data())) {
-            golem.clearFetchFlags();
-            golem.farmerState(FarmerState.MOVING_TO_CHEST);
-            return;
-        }
-
-        if (this.ctx.settings().farmer.collectGroundLoot) {
-            GolemGroundLootWork.Phase loot = this.ctx.groundLoot().tick(golem, copper, true);
-            if (loot == GolemGroundLootWork.Phase.MOVING) {
-                golem.clearFetchFlags();
-                golem.farmerState(FarmerState.WANDERING);
-                return;
-            }
-            if (loot == GolemGroundLootWork.Phase.PICKED) {
-                golem.clearFetchFlags();
-                if (this.ctx.groundLoot().hasLoot(golem.data())) {
-                    golem.farmerState(FarmerState.WANDERING);
-                    return;
-                }
-                if (!golem.carried().isEmpty() && this.ctx.chestService().hasSpace(golem.data())) {
-                    golem.farmerState(FarmerState.MOVING_TO_CHEST);
-                    return;
-                }
-            } else if (this.ctx.groundLoot().hasLoot(golem.data())) {
-                golem.clearFetchFlags();
-                golem.farmerState(FarmerState.WANDERING);
-                return;
-            }
-        }
-
         if (!this.ctx.farmAreaService().hasValidSeat(golem.data())) {
+            if (this.cycle.assignNextJob(golem)) {
+                return;
+            }
             golem.farmerState(FarmerState.WAIT_GROWTH);
             return;
         }
 
         applySeatPhase(golem, this.ctx.seatWork().sitOnBench(golem, copper));
+    }
+
+    private boolean shouldLeaveSeat(ActiveGolem golem) {
+        int radius = this.ctx.chestService().effectiveRadius(golem.data());
+        if (!this.ctx.farmAreaService().matureCrops(golem.data(), radius, this.ctx.enabledCrops()).isEmpty()) {
+            return true;
+        }
+        if (!this.ctx.farmAreaService().fieldWeeds(golem.data(), radius).isEmpty()) {
+            return true;
+        }
+        if (!this.ctx.farmAreaService().tillableSoil(golem.data(), radius).isEmpty()) {
+            return true;
+        }
+        if (this.ctx.hasPlantWork(golem)) {
+            return true;
+        }
+        Settings.Farmer farmer = this.ctx.settings().farmer;
+        if (farmer.useBoneMeal && this.ctx.hasBoneMealWork(golem)) {
+            return true;
+        }
+        if (farmer.craftBread
+                && golem.data().hasCraftStation()
+                && this.ctx.chestService().countItem(golem.data(), Material.WHEAT) >= 3
+                && this.ctx.chestService().hasSpace(golem.data())) {
+            return true;
+        }
+        if (canStartTorchJob(golem, radius, farmer)) {
+            return true;
+        }
+        return farmer.placeFence
+                && this.ctx.farmAreaService().needsOuterFenceWork(golem.data(), radius);
+    }
+
+    private boolean canStartTorchJob(ActiveGolem golem, int radius, Settings.Farmer farmer) {
+        if (!farmer.placeTorches) {
+            return false;
+        }
+        Material torch = this.ctx.resolveTorch();
+        return this.ctx.chestService().countItem(golem.data(), torch) > 0
+                && !this.ctx.farmAreaService().perimeterTorchSpots(golem.data(), radius).isEmpty();
     }
 
     private void applySeatPhase(ActiveGolem golem, GolemSeatWork.Phase phase) {

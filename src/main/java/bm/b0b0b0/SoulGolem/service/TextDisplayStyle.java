@@ -35,10 +35,14 @@ public final class TextDisplayStyle {
     }
 
     public static void applyGolemNameplate(TextDisplay display, Settings.TextDisplays settings) {
+        applyGolemNameplate(display, settings, Math.max(0.0F, settings.golemOffsetY));
+    }
+
+    public static void applyGolemNameplate(TextDisplay display, Settings.TextDisplays settings, float rideOffsetY) {
         applyCommon(display, settings);
         float scale = Math.max(0.05F, settings.golemScale);
         display.setTransformation(new Transformation(
-                new Vector3f(0F, 0F, 0F),
+                new Vector3f(0F, rideOffsetY, 0F),
                 new AxisAngle4f(0F, 0F, 0F, 1F),
                 new Vector3f(scale, scale, scale),
                 new AxisAngle4f(0F, 0F, 0F, 1F)

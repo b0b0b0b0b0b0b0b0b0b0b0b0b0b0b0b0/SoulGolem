@@ -7,6 +7,7 @@ import bm.b0b0b0.SoulGolem.model.MinerState;
 import bm.b0b0b0.SoulGolem.model.SetupPhase;
 import bm.b0b0b0.SoulGolem.model.SoulGolemData;
 import bm.b0b0b0.SoulGolem.service.FarmAreaService;
+import bm.b0b0b0.SoulGolem.service.GolemGaze;
 import bm.b0b0b0.SoulGolem.service.GolemMovement;
 import bm.b0b0b0.SoulGolem.service.OreTableService;
 import bm.b0b0b0.SoulGolem.service.SoulChestService;
@@ -119,6 +120,7 @@ public final class GolemSetupWork {
         copper.setVelocity(new Vector(0, 0, 0));
         golem.clearPathWaypoint();
         setActingState(golem, phase);
+        GolemGaze.face(golem, target.clone().add(0.5D, 0.5D, 0.5D));
         performAction(golem, copper, phase, target);
         golem.advanceSetupTarget();
         golem.data().lastActionAt(System.currentTimeMillis());
@@ -171,6 +173,7 @@ public final class GolemSetupWork {
         copper.setVelocity(new Vector(0, 0, 0));
         golem.clearPathWaypoint();
         setActingState(golem, SetupPhase.CLEAR);
+        GolemGaze.face(golem, reachPoint);
         clearInFront(data, world, copper.getLocation(), x, homeY, z, radius);
         golem.data().lastActionAt(System.currentTimeMillis());
         golem.markDirty();

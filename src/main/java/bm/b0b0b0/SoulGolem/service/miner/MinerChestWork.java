@@ -3,8 +3,10 @@ package bm.b0b0b0.SoulGolem.service.miner;
 import bm.b0b0b0.SoulGolem.config.settings.Settings;
 import bm.b0b0b0.SoulGolem.model.ActiveGolem;
 import bm.b0b0b0.SoulGolem.model.MinerState;
+import bm.b0b0b0.SoulGolem.service.GolemGaze;
 import bm.b0b0b0.SoulGolem.service.GolemMovement;
 import bm.b0b0b0.SoulGolem.service.GolemTorchWork;
+import bm.b0b0b0.SoulGolem.service.SoulChestLid;
 import java.util.ArrayList;
 import java.util.List;
 import org.bukkit.Location;
@@ -30,15 +32,16 @@ public final class MinerChestWork {
     }
 
     public void continueDeposit(ActiveGolem golem, CopperGolem copper) {
+        SoulChestLid lid = this.ctx.chestService().lid();
         Location chestStand = this.ctx.chestService().chestStandLocation(golem.data());
         if (chestStand == null) {
-            this.ctx.chestService().closeLid(golem.data());
+            lid.closeNow(golem.data());
             golem.state(MinerState.IDLE);
             return;
         }
         if (GolemMovement.horizontalDistanceSquared(copper.getLocation(), chestStand) > 1.69D) {
-            this.ctx.chestService().closeLid(golem.data());
-            this.ctx.walkTowards(copper, chestStand, golem.data());
+            lid.closeNow(golem.data());
+            this.ctx.walkTowards(copper, chestStand, golem);
             return;
         }
         this.ctx.movement().stop(copper);
@@ -49,47 +52,47 @@ public final class MinerChestWork {
                 golem.data().chestY() + 0.5D,
                 golem.data().chestZ() + 0.5D
         );
-        copper.lookAt(chestLook);
-        this.ctx.chestService().openLid(golem.data());
+        GolemGaze.face(golem, chestLook);
+        lid.open(golem.data());
 
         if (golem.fetchingTorch()) {
             takeTorchesFromChest(golem);
-            this.ctx.chestService().scheduleCloseLid(golem.data());
+            lid.closeLater(golem.data());
             return;
         }
         if (golem.fetchingFence() || golem.fetchingGate()) {
             this.support.takeFenceFromChest(golem);
-            this.ctx.chestService().scheduleCloseLid(golem.data());
+            lid.closeLater(golem.data());
             return;
         }
         if (golem.fetchingSeat()) {
             takeSeatFromChest(golem);
-            this.ctx.chestService().scheduleCloseLid(golem.data());
+            lid.closeLater(golem.data());
             return;
         }
         if (golem.fetchingFeed()) {
             takeFeedFromChest(golem);
-            this.ctx.chestService().scheduleCloseLid(golem.data());
+            lid.closeLater(golem.data());
             return;
         }
         if (golem.fetchingPickaxe()) {
             this.ctx.pickaxeWork().swapAtChest(golem);
-            this.ctx.chestService().scheduleCloseLid(golem.data());
+            lid.closeLater(golem.data());
             return;
         }
         if (golem.fetchingWeapon()) {
             this.ctx.combat().takeWeaponFromChest(golem, copper);
-            this.ctx.chestService().scheduleCloseLid(golem.data());
+            lid.closeLater(golem.data());
             return;
         }
 
         if (golem.carried().isEmpty()) {
-            this.ctx.chestService().scheduleCloseLid(golem.data());
+            lid.closeLater(golem.data());
             afterDeposit(golem);
             return;
         }
         if (!this.ctx.chestService().hasSpace(golem.data())) {
-            this.ctx.chestService().scheduleCloseLid(golem.data());
+            lid.closeLater(golem.data());
             golem.state(MinerState.WAITING_CHEST);
             this.ctx.notifyChestFull(golem);
             return;
@@ -109,7 +112,7 @@ public final class MinerChestWork {
         }
 
         this.ctx.playDepositFx(chestStand);
-        this.ctx.chestService().scheduleCloseLid(golem.data());
+        lid.closeLater(golem.data());
         if (!depositedAll) {
             golem.state(MinerState.WAITING_CHEST);
             this.ctx.notifyChestFull(golem);
@@ -155,7 +158,7 @@ public final class MinerChestWork {
         if (this.support.tryStartFenceJob(golem, radius, miner)) {
             return;
         }
-        if (this.support.tryStartSeatJob(golem, radius, miner)) {
+        if (this.support.tryGoToSeat(golem, radius, miner)) {
             return;
         }
         startRest(golem);
@@ -221,20 +224,18 @@ public final class MinerChestWork {
     }
 
     public void startRest(ActiveGolem golem) {
-        int mood = this.ctx.moodScore(golem.data());
-        double restMult = this.ctx.settings().moodRestMultiplierAt(mood);
-        if (this.ctx.farmAreaService().hasValidSeat(golem.data())) {
-            long rest = Math.max(1L, Math.round(this.ctx.settings().miner.seatRestTicks * restMult));
-            golem.clearFetchFlags();
-            golem.restTicksLeft(rest);
-            golem.state(MinerState.MOVING_TO_SEAT);
+        int radius = this.ctx.chestService().effectiveRadius(golem.data());
+        if (this.support != null && this.support.tryGoToSeat(golem, radius, this.ctx.settings().miner)) {
             return;
         }
+        int mood = this.ctx.moodScore(golem.data());
+        double restMult = this.ctx.settings().moodRestMultiplierAt(mood);
         long rest = Math.max(0L, Math.round(this.ctx.settings().miner.standingRestTicks * restMult));
         if (rest <= 0L) {
             golem.state(MinerState.IDLE);
             return;
         }
+        golem.clearFetchFlags();
         golem.restTicksLeft(rest);
         golem.data().lastActionAt(System.currentTimeMillis());
         golem.state(MinerState.RESTING);
@@ -246,7 +247,7 @@ public final class MinerChestWork {
         if (now - golem.data().lastActionAt() >= interval) {
             golem.data().lastActionAt(now);
             int radius = this.ctx.chestService().effectiveRadius(golem.data());
-            if (this.support != null && this.support.tryStartSeatJob(golem, radius, this.ctx.settings().miner)) {
+            if (this.support != null && this.support.tryGoToSeat(golem, radius, this.ctx.settings().miner)) {
                 golem.restTicksLeft(0L);
                 return;
             }

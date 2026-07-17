@@ -14,6 +14,8 @@ import org.bukkit.persistence.PersistentDataType;
 
 public final class GolemDisplay {
 
+    private static final double ORPHAN_SWEEP_RANGE = 48.0D;
+
     private GolemDisplay() {
     }
 
@@ -156,11 +158,7 @@ public final class GolemDisplay {
             String energy = String.valueOf(golem.data().energy());
             String plateKey = nameKey(golem) + "|" + key + "|" + energy + (time.isEmpty() ? "" : "|" + time);
             TextDisplay display = ensureNameplate(copper, golem.data().id().toString(), keys, style);
-            TextDisplayStyle.applyGolemNameplate(display, style);
-            Location at = nameplateLocation(copper, style);
-            if (display.getLocation().distanceSquared(at) > 0.04D) {
-                display.teleport(at);
-            }
+            TextDisplayStyle.applyGolemNameplate(display, style, style.golemOffsetY);
             copper.setCustomNameVisible(false);
             copper.customName(null);
             if (!plateKey.equals(golem.lastStatusKey())) {
@@ -217,7 +215,15 @@ public final class GolemDisplay {
     }
 
     public static void remove(CopperGolem copper, String golemId, PluginKeys keys) {
-        removeAllNear(copper.getWorld(), copper.getLocation(), 48.0D, golemId, keys);
+        if (copper != null && copper.isValid()) {
+            for (Entity passenger : copper.getPassengers()) {
+                if (passenger instanceof TextDisplay display && isGolemNameplate(display, golemId, keys)) {
+                    passenger.remove();
+                }
+            }
+            removeAllNear(copper.getWorld(), copper.getLocation(), ORPHAN_SWEEP_RANGE, golemId, keys);
+            return;
+        }
     }
 
     public static void removeAllNear(World world, Location center, double range, String golemId, PluginKeys keys) {
@@ -235,8 +241,7 @@ public final class GolemDisplay {
     }
 
     private static boolean matchesGolemDisplay(TextDisplay display, String golemId, PluginKeys keys) {
-        String plate = display.getPersistentDataContainer().get(keys.golemId(), PersistentDataType.STRING);
-        if (golemId.equals(plate)) {
+        if (isGolemNameplate(display, golemId, keys)) {
             return true;
         }
         String chest = display.getPersistentDataContainer().get(keys.chestGolemId(), PersistentDataType.STRING);
@@ -247,8 +252,9 @@ public final class GolemDisplay {
         return golemId.equals(craft);
     }
 
-    private static Location nameplateLocation(CopperGolem copper, Settings.TextDisplays style) {
-        return copper.getLocation().add(0.0D, copper.getHeight() + Math.max(0.0F, style.golemOffsetY), 0.0D);
+    private static boolean isGolemNameplate(TextDisplay display, String golemId, PluginKeys keys) {
+        String plate = display.getPersistentDataContainer().get(keys.golemId(), PersistentDataType.STRING);
+        return golemId.equals(plate);
     }
 
     private static TextDisplay ensureNameplate(
@@ -258,12 +264,11 @@ public final class GolemDisplay {
             Settings.TextDisplays style
     ) {
         TextDisplay kept = null;
-        for (Entity nearby : copper.getWorld().getNearbyEntities(copper.getLocation(), 2.5D, 3.0D, 2.5D)) {
-            if (!(nearby instanceof TextDisplay display)) {
+        for (Entity passenger : copper.getPassengers()) {
+            if (!(passenger instanceof TextDisplay display) || !display.isValid()) {
                 continue;
             }
-            String raw = display.getPersistentDataContainer().get(keys.golemId(), PersistentDataType.STRING);
-            if (!golemId.equals(raw)) {
+            if (!isGolemNameplate(display, golemId, keys)) {
                 continue;
             }
             if (kept == null) {
@@ -272,13 +277,50 @@ public final class GolemDisplay {
                 display.remove();
             }
         }
+
+        World world = copper.getWorld();
+        Location origin = copper.getLocation();
+        for (Entity nearby : world.getNearbyEntities(origin, ORPHAN_SWEEP_RANGE, ORPHAN_SWEEP_RANGE, ORPHAN_SWEEP_RANGE)) {
+            if (!(nearby instanceof TextDisplay display) || !display.isValid()) {
+                continue;
+            }
+            if (!isGolemNameplate(display, golemId, keys)) {
+                continue;
+            }
+            if (kept == null) {
+                kept = display;
+            } else if (!display.getUniqueId().equals(kept.getUniqueId())) {
+                display.remove();
+            }
+        }
+
         if (kept != null && kept.isValid()) {
+            mountNameplate(copper, kept);
             return kept;
         }
-        Location at = nameplateLocation(copper, style);
-        return copper.getWorld().spawn(at, TextDisplay.class, spawned -> {
-            spawned.getPersistentDataContainer().set(keys.golemId(), PersistentDataType.STRING, golemId);
-            TextDisplayStyle.applyGolemNameplate(spawned, style);
+
+        float rideY = style.golemOffsetY;
+        TextDisplay spawned = world.spawn(origin, TextDisplay.class, display -> {
+            display.getPersistentDataContainer().set(keys.golemId(), PersistentDataType.STRING, golemId);
+            display.setPersistent(false);
+            TextDisplayStyle.applyGolemNameplate(display, style, rideY);
         });
+        mountNameplate(copper, spawned);
+        return spawned;
+    }
+
+    private static void mountNameplate(CopperGolem copper, TextDisplay display) {
+        if (!display.isValid() || !copper.isValid()) {
+            return;
+        }
+        display.setPersistent(false);
+        display.setGravity(false);
+        if (display.getVehicle() != null && display.getVehicle().getUniqueId().equals(copper.getUniqueId())) {
+            return;
+        }
+        if (display.getVehicle() != null) {
+            display.leaveVehicle();
+        }
+        copper.addPassenger(display);
     }
 }

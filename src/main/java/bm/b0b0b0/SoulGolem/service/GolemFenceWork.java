@@ -201,6 +201,7 @@ public final class GolemFenceWork {
             return Phase.MOVING_CLEAR;
         }
         copper.setVelocity(new Vector(0, 0, 0));
+        GolemGaze.faceBlock(golem, block);
         this.farmAreaService.clearOuterFenceObstruction(block, golem.data());
         if (onEnergy != null) {
             onEnergy.accept(golem);
@@ -237,6 +238,7 @@ public final class GolemFenceWork {
             return Phase.MOVING_FENCE;
         }
         copper.setVelocity(new Vector(0, 0, 0));
+        GolemGaze.faceBlock(golem, spot);
         this.farmAreaService.placeOuterFence(spot, fence, golem.data().id());
         consumeCarried(golem, fence, 1);
         if (onEnergy != null) {
@@ -287,6 +289,7 @@ public final class GolemFenceWork {
             return Phase.MOVING_GATE;
         }
         copper.setVelocity(new Vector(0, 0, 0));
+        GolemGaze.faceBlock(golem, spot);
         this.farmAreaService.placeOuterGate(golem.data(), spot, gate, golem.data().id());
         consumeCarried(golem, gate, 1);
         if (onEnergy != null) {

@@ -5,7 +5,6 @@ import bm.b0b0b0.SoulGolem.model.SoulGolemData;
 import java.util.List;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
-import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.entity.CopperGolem;
 import org.bukkit.util.Vector;
@@ -70,7 +69,10 @@ public final class GolemRainShelterWork {
                 this.movement.walkTowards(copper, stand, golem);
                 return Phase.MOVING;
             }
+            this.movement.stop(copper);
             copper.setVelocity(new Vector(0, 0, 0));
+            Block first = missing.get(0);
+            GolemGaze.faceBlock(golem, first);
             for (Block block : missing) {
                 this.farmAreaService.placeRainShelterBlock(block, golem.data().id());
             }
@@ -78,20 +80,26 @@ public final class GolemRainShelterWork {
             return Phase.BUILDING;
         }
 
-        if (GolemMovement.horizontalDistanceSquared(copper.getLocation(), stand) > 0.85D) {
+        if (GolemMovement.horizontalDistanceSquared(copper.getLocation(), stand) > 2.25D) {
             this.movement.walkTowards(copper, stand, golem);
             return Phase.MOVING;
         }
 
-        copper.setVelocity(new Vector(0, 0, 0));
-        Location look = this.workAreaService.homeLocation(golem.data());
+        parkUnderShelter(golem, copper, stand);
+        return Phase.SHELTERING;
+    }
+
+    private void parkUnderShelter(ActiveGolem golem, CopperGolem copper, Location stand) {
+        GolemAiMode.disable(copper, this.movement);
         Location sit = stand.clone();
+        Location look = this.workAreaService.homeLocation(golem.data());
         if (look != null) {
             sit.setYaw(GolemMovement.yawTo(sit, look));
+            GolemGaze.face(golem, look.clone().add(0.0D, 1.0D, 0.0D));
         }
         sit.setPitch(0.0F);
-        copper.teleport(sit);
+        GolemTeleport.park(copper, sit);
+        GolemGazeService.forceLook(copper, golem);
         golem.data().lastActionAt(System.currentTimeMillis());
-        return Phase.SHELTERING;
     }
 }

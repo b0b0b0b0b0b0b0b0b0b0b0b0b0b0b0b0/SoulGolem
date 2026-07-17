@@ -4,6 +4,7 @@ import bm.b0b0b0.SoulGolem.model.ActiveGolem;
 import bm.b0b0b0.SoulGolem.model.CropType;
 import bm.b0b0b0.SoulGolem.model.FarmerState;
 import bm.b0b0b0.SoulGolem.service.GolemGroundLootWork;
+import bm.b0b0b0.SoulGolem.service.GolemGaze;
 import bm.b0b0b0.SoulGolem.service.GolemMovement;
 import java.util.Collection;
 import java.util.List;
@@ -64,7 +65,12 @@ public final class FarmerFieldWork {
                 golem.targetCrop(null);
                 golem.fieldReady(true);
                 if (!this.cycle.tryStartPlant(golem)) {
-                    golem.farmerState(FarmerState.WAITING_SEEDS);
+                    int r = this.ctx.chestService().effectiveRadius(golem.data());
+                    if (this.ctx.farmAreaService().hasFieldCrops(golem.data(), r, this.ctx.enabledCrops())) {
+                        golem.farmerState(FarmerState.WAIT_GROWTH);
+                    } else {
+                        golem.farmerState(FarmerState.WAITING_SEEDS);
+                    }
                 }
                 golem.markDirty();
                 return;
@@ -84,6 +90,7 @@ public final class FarmerFieldWork {
         }
         copper.setVelocity(new Vector(0, 0, 0));
         golem.farmerState(FarmerState.TILLING);
+        GolemGaze.faceBlock(golem, soil);
         this.ctx.farmAreaService().tillSoil(soil, golem.data().id());
         this.ctx.drainFarmEnergy(golem);
         golem.targetCrop(null);
@@ -92,7 +99,12 @@ public final class FarmerFieldWork {
         if (left.isEmpty()) {
             golem.fieldReady(true);
             if (!this.cycle.tryStartPlant(golem)) {
-                golem.farmerState(FarmerState.WAITING_SEEDS);
+                int r = this.ctx.chestService().effectiveRadius(golem.data());
+                if (this.ctx.farmAreaService().hasFieldCrops(golem.data(), r, this.ctx.enabledCrops())) {
+                    golem.farmerState(FarmerState.WAIT_GROWTH);
+                } else {
+                    golem.farmerState(FarmerState.WAITING_SEEDS);
+                }
             }
             return;
         }
@@ -155,6 +167,7 @@ public final class FarmerFieldWork {
         if (plantType == null) {
             plantType = CropType.WHEAT;
         }
+        GolemGaze.faceBlockTop(golem, soil);
         this.carried.consumeCarriedSeed(golem);
         this.ctx.farmAreaService().plantCrop(soil, plantType, golem.data().id());
         this.ctx.drainFarmEnergy(golem);
@@ -180,13 +193,35 @@ public final class FarmerFieldWork {
         if (!this.ctx.stationsOk(golem)) {
             return;
         }
+        if (!this.ctx.farmAreaService().ensureInsideBorder(golem, copper, this.ctx.movement())) {
+            return;
+        }
         if (divertToFence(golem, copper)) {
             return;
+        }
+        int radius = this.ctx.chestService().effectiveRadius(golem.data());
+        if (this.cycle.tryStartTorchJob(golem)) {
+            golem.wanderTarget(null);
+            return;
+        }
+        if (!this.ctx.farmAreaService().matureCrops(golem.data(), radius, this.ctx.enabledCrops()).isEmpty()
+                || !this.ctx.farmAreaService().fieldWeeds(golem.data(), radius).isEmpty()) {
+            if (this.cycle.assignNextJob(golem)) {
+                golem.wanderTarget(null);
+                return;
+            }
         }
         if (FarmerCarried.carriedStairs(golem) != null && !this.ctx.farmAreaService().hasValidSeat(golem.data())) {
             golem.wanderTarget(null);
             golem.clearFetchFlags();
             golem.farmerState(FarmerState.MOVING_TO_SEAT);
+            this.support.continueSeat(golem, copper);
+            return;
+        }
+        if (this.ctx.farmAreaService().hasValidSeat(golem.data())) {
+            golem.wanderTarget(null);
+            golem.farmerState(FarmerState.MOVING_TO_SEAT);
+            this.support.continueSeat(golem, copper);
             return;
         }
         if (this.cycle.assignNextJob(golem)) {
@@ -222,12 +257,6 @@ public final class FarmerFieldWork {
             golem.farmerState(FarmerState.MOVING_TO_CHEST);
             return;
         }
-        if (this.ctx.farmAreaService().hasValidSeat(golem.data())) {
-            golem.wanderTarget(null);
-            golem.farmerState(FarmerState.MOVING_TO_SEAT);
-            this.support.continueSeat(golem, copper);
-            return;
-        }
         if (this.ctx.settings().farmer.wanderWhileWaiting) {
             wander(golem, copper, this.ctx.chestService().effectiveRadius(golem.data()));
             return;
@@ -237,9 +266,14 @@ public final class FarmerFieldWork {
     }
 
     public void wander(ActiveGolem golem, CopperGolem copper, int radius) {
+        if (!this.ctx.farmAreaService().ensureInsideBorder(golem, copper, this.ctx.movement())) {
+            return;
+        }
         golem.farmerState(FarmerState.WANDERING);
         Location target = golem.wanderTarget();
-        if (target == null || GolemMovement.horizontalDistanceSquared(copper.getLocation(), target) < 1.0D) {
+        if (target == null
+                || !this.ctx.farmAreaService().insideWoolBorder(golem.data(), target)
+                || GolemMovement.horizontalDistanceSquared(copper.getLocation(), target) < 1.0D) {
             target = this.ctx.farmAreaService().randomWanderPoint(golem.data(), radius);
             golem.wanderTarget(target);
             if (target == null) {
@@ -255,14 +289,17 @@ public final class FarmerFieldWork {
         }
         Location target = golem.targetCrop();
         if (target == null) {
-            golem.farmerState(FarmerState.WAITING_SEEDS);
+            this.cycle.enterIdle(golem);
             return;
         }
         Block crop = target.getBlock();
         CropType cropType = CropType.byCrop(crop.getType());
         if (cropType == null || !this.ctx.enabledCrops().contains(cropType)) {
             golem.targetCrop(null);
-            golem.farmerState(FarmerState.WAIT_GROWTH);
+            if (this.cycle.assignNextJob(golem)) {
+                return;
+            }
+            this.cycle.enterIdle(golem);
             return;
         }
         Location stand = crop.getLocation().add(0.5D, 0.0D, 0.5D);
@@ -273,6 +310,7 @@ public final class FarmerFieldWork {
         }
         copper.setVelocity(new Vector(0, 0, 0));
         golem.farmerState(FarmerState.HARVESTING);
+        GolemGaze.faceBlock(golem, crop);
         Collection<ItemStack> drops = FarmerCarried.cropHarvestDrops(crop, cropType);
         crop.setType(Material.AIR, false);
         for (ItemStack drop : drops) {
@@ -352,6 +390,7 @@ public final class FarmerFieldWork {
         }
         copper.setVelocity(new Vector(0, 0, 0));
         golem.farmerState(FarmerState.APPLYING_BONEMEAL);
+        GolemGaze.faceBlock(golem, crop);
 
         int ageBefore = 0;
         if (crop.getBlockData() instanceof org.bukkit.block.data.Ageable ageable) {
@@ -409,12 +448,10 @@ public final class FarmerFieldWork {
         }
         this.ctx.requestBoneMealFromChest(golem);
         if (GolemMovement.horizontalDistanceSquared(copper.getLocation(), chestStand) <= 1.69D) {
-            this.ctx.chestService().openLid(golem.data());
-            takeBoneMealFromChest(golem);
-            this.ctx.chestService().scheduleCloseLid(golem.data());
+            this.ctx.chestService().lid().run(golem.data(), () -> takeBoneMealFromChest(golem));
             return;
         }
-        this.ctx.chestService().closeLid(golem.data());
+        this.ctx.chestService().lid().closeNow(golem.data());
         this.ctx.movement().walkTowards(copper, chestStand, golem);
     }
 

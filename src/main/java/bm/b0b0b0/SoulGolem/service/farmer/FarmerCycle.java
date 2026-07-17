@@ -5,6 +5,7 @@ import bm.b0b0b0.SoulGolem.model.ActiveGolem;
 import bm.b0b0b0.SoulGolem.model.CropType;
 import bm.b0b0b0.SoulGolem.model.FarmerState;
 import bm.b0b0b0.SoulGolem.service.GolemFenceWork;
+import bm.b0b0b0.SoulGolem.service.GolemGaze;
 import java.util.List;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -22,6 +23,9 @@ public final class FarmerCycle {
 
     public void beginCycle(ActiveGolem golem, CopperGolem copper) {
         if (!this.ctx.stationsOk(golem)) {
+            return;
+        }
+        if (!this.ctx.farmAreaService().ensureInsideBorder(golem, copper, this.ctx.movement())) {
             return;
         }
         if (!golem.carried().isEmpty()) {
@@ -52,6 +56,13 @@ public final class FarmerCycle {
             return;
         }
         enterIdle(golem);
+        if (golem.farmerState() == FarmerState.MOVING_TO_SEAT) {
+            switch (this.ctx.seatWork().sitOnBench(golem, copper)) {
+                case MOVING, PLACING -> golem.farmerState(FarmerState.MOVING_TO_SEAT);
+                case SITTING -> golem.farmerState(FarmerState.SITTING);
+                case UNAVAILABLE, DONE -> golem.farmerState(FarmerState.WAIT_GROWTH);
+            }
+        }
     }
 
     public void enterIdle(ActiveGolem golem) {
@@ -59,9 +70,19 @@ public final class FarmerCycle {
         golem.fetchingSeed(false);
         golem.wanderTarget(null);
         golem.targetCrop(null);
+        GolemGaze.clear(golem);
         int radius = this.ctx.chestService().effectiveRadius(golem.data());
+        if (this.ctx.farmAreaService().hasValidSeat(golem.data())) {
+            golem.farmerState(FarmerState.MOVING_TO_SEAT);
+            golem.data().lastActionAt(System.currentTimeMillis());
+            return;
+        }
         if (!this.ctx.farmAreaService().emptyFarmland(golem.data(), radius).isEmpty()) {
-            golem.farmerState(FarmerState.WAITING_SEEDS);
+            if (this.ctx.farmAreaService().hasFieldCrops(golem.data(), radius, this.ctx.enabledCrops())) {
+                golem.farmerState(FarmerState.WAIT_GROWTH);
+            } else {
+                golem.farmerState(FarmerState.WAITING_SEEDS);
+            }
             golem.data().lastActionAt(System.currentTimeMillis());
             return;
         }
@@ -72,11 +93,6 @@ public final class FarmerCycle {
         }
         if (!golem.carried().isEmpty() && this.ctx.chestService().hasSpace(golem.data())) {
             golem.farmerState(FarmerState.MOVING_TO_CHEST);
-            golem.data().lastActionAt(System.currentTimeMillis());
-            return;
-        }
-        if (this.ctx.farmAreaService().hasValidSeat(golem.data())) {
-            golem.farmerState(FarmerState.MOVING_TO_SEAT);
             golem.data().lastActionAt(System.currentTimeMillis());
             return;
         }
@@ -193,13 +209,22 @@ public final class FarmerCycle {
             return true;
         }
 
+        if (tryStartTorchJob(golem, radius, farmer)) {
+            return true;
+        }
+
         List<Block> empty = this.ctx.farmAreaService().emptyFarmland(golem.data(), radius);
-        if (!empty.isEmpty()) {
+        if (!empty.isEmpty()
+                && !this.ctx.farmAreaService().hasFieldCrops(golem.data(), radius, this.ctx.enabledCrops())) {
             golem.clearFetchFlags();
             golem.wanderTarget(null);
             golem.targetCrop(null);
             golem.farmerState(FarmerState.WAITING_SEEDS);
             golem.data().lastActionAt(System.currentTimeMillis());
+            return true;
+        }
+
+        if (tryStartBread(golem)) {
             return true;
         }
 
@@ -238,14 +263,6 @@ public final class FarmerCycle {
             }
         }
 
-        if (tryStartTorchJob(golem, radius, farmer)) {
-            return true;
-        }
-
-        if (tryStartBread(golem)) {
-            return true;
-        }
-
         return false;
     }
 
@@ -275,9 +292,26 @@ public final class FarmerCycle {
         return true;
     }
 
-    public void afterDeposit(ActiveGolem golem) {
+    public void afterDeposit(ActiveGolem golem, CopperGolem copper) {
         golem.chestFullNotified(false);
         if (this.ctx.tryStartFeed(golem)) {
+            return;
+        }
+        int radius = this.ctx.chestService().effectiveRadius(golem.data());
+        if (!this.ctx.farmAreaService().matureCrops(golem.data(), radius, this.ctx.enabledCrops()).isEmpty()
+                || !this.ctx.farmAreaService().fieldWeeds(golem.data(), radius).isEmpty()) {
+            if (assignNextJob(golem)) {
+                return;
+            }
+        }
+        if (this.ctx.farmAreaService().hasValidSeat(golem.data())) {
+            golem.clearFetchFlags();
+            golem.fetchingSeed(false);
+            golem.wanderTarget(null);
+            golem.targetCrop(null);
+            golem.farmerState(FarmerState.MOVING_TO_SEAT);
+            golem.data().lastActionAt(System.currentTimeMillis());
+            startSeatNow(golem, copper);
             return;
         }
         if (tryStartPlant(golem)) {
@@ -290,6 +324,18 @@ public final class FarmerCycle {
             return;
         }
         enterIdle(golem);
+        startSeatNow(golem, copper);
+    }
+
+    private void startSeatNow(ActiveGolem golem, CopperGolem copper) {
+        if (copper == null || !copper.isValid() || golem.farmerState() != FarmerState.MOVING_TO_SEAT) {
+            return;
+        }
+        switch (this.ctx.seatWork().sitOnBench(golem, copper)) {
+            case MOVING, PLACING -> golem.farmerState(FarmerState.MOVING_TO_SEAT);
+            case SITTING -> golem.farmerState(FarmerState.SITTING);
+            case UNAVAILABLE, DONE -> golem.farmerState(FarmerState.WAIT_GROWTH);
+        }
     }
 
     public void startRest(ActiveGolem golem) {

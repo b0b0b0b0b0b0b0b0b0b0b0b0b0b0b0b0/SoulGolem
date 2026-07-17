@@ -74,7 +74,7 @@ public final class GolemGroundLootWork {
         int homeX = (int) Math.floor(data.homeX());
         int homeY = (int) Math.floor(data.homeY());
         int homeZ = (int) Math.floor(data.homeZ());
-        int maxR = Math.max(1, radius) + 1;
+        int maxR = Math.max(1, radius);
         int dx = Math.abs(location.getBlockX() - homeX);
         int dz = Math.abs(location.getBlockZ() - homeZ);
         if (dx > maxR || dz > maxR) {
@@ -92,8 +92,8 @@ public final class GolemGroundLootWork {
         if (world == null) {
             return null;
         }
-        int maxR = Math.max(1, radius) + 1;
-        double box = maxR + 1.5D;
+        int maxR = Math.max(1, radius);
+        double box = maxR + 0.75D;
         Item best = null;
         double bestDist = Double.MAX_VALUE;
         for (Entity entity : world.getNearbyEntities(home, box, 4.0D, box)) {

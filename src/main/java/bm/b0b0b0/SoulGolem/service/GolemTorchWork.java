@@ -56,6 +56,7 @@ public final class GolemTorchWork {
         }
         copper.setVelocity(new Vector(0, 0, 0));
         Block spot = target.getBlock();
+        GolemGaze.faceBlock(golem, spot);
         if (spot.getType().isAir()) {
             this.farmAreaService.placeTorch(spot, torch, golem.data().id());
             consumeCarried(golem, torch, 1);

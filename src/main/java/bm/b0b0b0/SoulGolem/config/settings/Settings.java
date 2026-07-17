@@ -23,6 +23,11 @@ public final class Settings extends YamlSerializable {
     })
     public String language = "ru";
 
+    @Comment({
+            @CommentValue("Log seat approach/teleport to console (sit debug)")
+    })
+    public boolean debugSeat = true;
+
     @NewLine
     @Comment({
             @CommentValue("Maximum active golems per player (permission overrides possible later)")
@@ -50,7 +55,7 @@ public final class Settings extends YamlSerializable {
     public long coordinatorPeriodTicks = 10L;
 
     @Comment({
-            @CommentValue("Movement speed while walking to ore")
+            @CommentValue("Pathfinder speed multiplier (1.0 = vanilla copper golem walk). Mood does not affect walk.")
     })
     public double walkSpeed = 1.0D;
 
@@ -369,9 +374,9 @@ public final class Settings extends YamlSerializable {
         public boolean fullBright = true;
 
         @Comment({
-                @CommentValue("Extra height above golem hitbox for nameplate (copper golem antenna)")
+                @CommentValue("Nameplate Y above passenger mount (top of golem + antenna)")
         })
-        public float golemOffsetY = 0.85F;
+        public float golemOffsetY = 0.55F;
 
         @Comment({
                 @CommentValue("Golem nameplate scale")

@@ -30,6 +30,8 @@ public final class ActiveGolem {
     private UUID combatTarget;
     private Material combatWeapon;
     private long lastCombatAttackAt;
+    private Location gazePoint;
+    private UUID gazeEntityId;
     private boolean pickaxeSwapBlocked;
     private Material upgradePickaxe;
     private int blocksLeftThisTrip;
@@ -220,6 +222,22 @@ public final class ActiveGolem {
 
     public void lastCombatAttackAt(long lastCombatAttackAt) {
         this.lastCombatAttackAt = lastCombatAttackAt;
+    }
+
+    public Location gazePoint() {
+        return this.gazePoint;
+    }
+
+    public void gazePoint(Location gazePoint) {
+        this.gazePoint = gazePoint;
+    }
+
+    public UUID gazeEntityId() {
+        return this.gazeEntityId;
+    }
+
+    public void gazeEntityId(UUID gazeEntityId) {
+        this.gazeEntityId = gazeEntityId;
     }
 
     public boolean pickaxeSwapBlocked() {

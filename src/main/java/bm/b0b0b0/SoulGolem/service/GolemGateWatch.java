@@ -6,9 +6,6 @@ import org.bukkit.block.Block;
 import org.bukkit.entity.CopperGolem;
 import org.bukkit.util.Vector;
 
-/**
- * Ленивое закрытие калитки: увидел открытую → ждёт delay → идёт закрывает.
- */
 public final class GolemGateWatch {
 
     public enum Phase {
@@ -32,7 +29,6 @@ public final class GolemGateWatch {
         this.movement = movement;
     }
 
-    /** Дешёвый peek: открыта дольше delayMs? */
     public boolean shouldStartClose(ActiveGolem golem, boolean enabled, long delayMs) {
         if (!enabled) {
             golem.gateOpenSeenAt(0L);
@@ -76,6 +72,7 @@ public final class GolemGateWatch {
 
         copper.setVelocity(new Vector(0, 0, 0));
         this.farmAreaService.closeOuterGate(gate);
+        GolemGaze.faceBlock(golem, gate);
         golem.gateOpenSeenAt(0L);
         golem.data().lastActionAt(System.currentTimeMillis());
         return Phase.CLOSING;

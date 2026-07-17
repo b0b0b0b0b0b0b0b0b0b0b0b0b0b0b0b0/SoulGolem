@@ -4,6 +4,7 @@ import bm.b0b0b0.SoulGolem.config.settings.Settings;
 import bm.b0b0b0.SoulGolem.model.ActiveGolem;
 import bm.b0b0b0.SoulGolem.model.MinerState;
 import bm.b0b0b0.SoulGolem.service.FarmAreaService;
+import bm.b0b0b0.SoulGolem.service.GolemAiMode;
 import bm.b0b0b0.SoulGolem.service.GolemControlService;
 import bm.b0b0b0.SoulGolem.service.GolemFenceWork;
 import bm.b0b0b0.SoulGolem.service.GolemGateWatch;
@@ -32,7 +33,7 @@ public final class MinerSupportWork {
     }
 
     public void continueShelter(ActiveGolem golem, CopperGolem copper) {
-        applyShelterPhase(golem, this.ctx.rainShelter().tick(
+        applyShelterPhase(golem, copper, this.ctx.rainShelter().tick(
                 golem,
                 copper,
                 this.ctx.settings().miner.rainShelter
@@ -57,7 +58,7 @@ public final class MinerSupportWork {
         }
     }
 
-    private void applyShelterPhase(ActiveGolem golem, GolemRainShelterWork.Phase phase) {
+    private void applyShelterPhase(ActiveGolem golem, CopperGolem copper, GolemRainShelterWork.Phase phase) {
         switch (phase) {
             case MOVING -> golem.state(MinerState.MOVING_TO_SHELTER);
             case BUILDING -> golem.state(MinerState.BUILDING_SHELTER);
@@ -66,10 +67,27 @@ public final class MinerSupportWork {
                 if (this.ctx.rainShelter().isStorming(golem.data())) {
                     golem.state(MinerState.SHELTERING);
                 } else {
+                    GolemAiMode.enable(
+                            this.ctx.plugin(),
+                            copper,
+                            this.ctx.registry(),
+                            this.ctx.keys()
+                    );
                     golem.state(MinerState.IDLE);
                 }
             }
         }
+    }
+
+    public boolean tryGoToSeat(ActiveGolem golem, int radius, Settings.Miner miner) {
+        if (this.ctx.farmAreaService().hasValidSeat(golem.data())) {
+            golem.clearFetchFlags();
+            golem.targetCrop(null);
+            golem.data().lastActionAt(System.currentTimeMillis());
+            golem.state(MinerState.MOVING_TO_SEAT);
+            return true;
+        }
+        return tryStartSeatJob(golem, radius, miner);
     }
 
     public boolean tryStartSeatJob(ActiveGolem golem, int radius, Settings.Miner miner) {
@@ -178,6 +196,33 @@ public final class MinerSupportWork {
 
     public void continueSeat(ActiveGolem golem, CopperGolem copper) {
         int radius = this.ctx.chestService().effectiveRadius(golem.data());
+
+        if (golem.state() == MinerState.SITTING
+                && this.ctx.farmAreaService().hasValidSeat(golem.data())) {
+            this.ctx.seatWork().holdOnBench(golem, copper);
+            if (golem.pauseAfterRest()) {
+                GolemControlService.finishPauseAfterRest(golem, this.ctx.repository());
+                return;
+            }
+            long left = golem.restTicksLeft() - Math.max(1L, this.ctx.settings().coordinatorPeriodTicks);
+            golem.restTicksLeft(left);
+            if (left > 0L) {
+                return;
+            }
+            golem.restTicksLeft(0L);
+            golem.data().lastActionAt(System.currentTimeMillis());
+            this.ctx.seatWork().leaveBench(
+                    golem,
+                    copper,
+                    this.ctx.plugin(),
+                    this.ctx.registry(),
+                    this.ctx.keys()
+            );
+            golem.restTicksLeft(0L);
+            golem.state(MinerState.IDLE);
+            return;
+        }
+
         Material stairs = MinerCarried.carriedStairs(golem);
         if (stairs != null && !this.ctx.farmAreaService().hasValidSeat(golem.data())) {
             GolemSeatWork.Phase phase = this.ctx.seatWork().placeCarriedSeat(golem, copper, stairs, radius);
@@ -224,6 +269,13 @@ public final class MinerSupportWork {
         }
         golem.restTicksLeft(0L);
         golem.data().lastActionAt(System.currentTimeMillis());
+        this.ctx.seatWork().leaveBench(
+                golem,
+                copper,
+                this.ctx.plugin(),
+                this.ctx.registry(),
+                this.ctx.keys()
+        );
         golem.state(MinerState.IDLE);
     }
 

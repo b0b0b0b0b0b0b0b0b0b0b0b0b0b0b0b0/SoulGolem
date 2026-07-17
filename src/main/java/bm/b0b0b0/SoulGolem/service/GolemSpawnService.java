@@ -47,6 +47,7 @@ public final class GolemSpawnService {
     private final OreTableService oreTableService;
     private final GolemRegistry registry;
     private final GolemRepository repository;
+    private final GolemGazeService gazeService;
     private final Set<UUID> respawning = ConcurrentHashMap.newKeySet();
 
     public GolemSpawnService(
@@ -71,6 +72,11 @@ public final class GolemSpawnService {
         this.oreTableService = oreTableService;
         this.registry = registry;
         this.repository = repository;
+        this.gazeService = new GolemGazeService(plugin, registry);
+    }
+
+    public GolemGazeService gazeService() {
+        return this.gazeService;
     }
 
     private PluginConfig config() {
@@ -175,6 +181,7 @@ public final class GolemSpawnService {
         active.setupPhase(SetupPhase.CLEAR);
         this.registry.register(active);
         this.registry.bindEntity(data.id(), entity.getUniqueId());
+        refreshSoulEntity(entity, type);
         GolemDisplay.refreshForce(active, entity, messages(), this.keys, config().settings().visuals.textDisplays);
         active.markDirty();
         this.repository.save(data);
@@ -207,34 +214,42 @@ public final class GolemSpawnService {
             throw new IllegalStateException("World missing for golem " + data.id());
         }
         return location.getWorld().spawn(location, CopperGolem.class, golem -> {
-            applySoulEntityFlags(golem, data.type());
+            applyBaseFlags(golem, data.type());
+            golem.setAware(false);
+            Bukkit.getMobGoals().removeAllGoals(golem);
             clearHand(golem);
             equipTool(golem, data.type(), config().settings());
             golem.getPersistentDataContainer().set(this.keys.golemId(), PersistentDataType.STRING, data.id().toString());
             golem.getPersistentDataContainer().set(this.keys.owner(), PersistentDataType.STRING, data.ownerUuid().toString());
+            this.gazeService.ensure(golem);
         });
     }
 
     public static void applySoulEntityFlags(CopperGolem golem) {
-        applySoulEntityFlags(golem, GolemType.MINER);
+        applyBaseFlags(golem, GolemType.MINER);
     }
 
     public static void applySoulEntityFlags(CopperGolem golem, GolemType type) {
+        applyBaseFlags(golem, type);
+    }
+
+    public void refreshSoulEntity(CopperGolem golem, GolemType type) {
+        applyBaseFlags(golem, type);
+        this.gazeService.ensure(golem);
+    }
+
+    private static void applyBaseFlags(CopperGolem golem, GolemType type) {
         golem.setCustomNameVisible(false);
         golem.customName(null);
         golem.setRemoveWhenFarAway(false);
         golem.setPersistent(true);
         golem.setAI(true);
-        golem.setAware(true);
         golem.setCanPickupItems(false);
         golem.setSilent(false);
         golem.setInvulnerable(true);
-        golem.setGravity(true);
-        golem.setCollidable(true);
         golem.setFireTicks(0);
         golem.setRemainingAir(golem.getMaximumAir());
         golem.setTarget(null);
-        Bukkit.getMobGoals().removeAllGoals(golem);
         GolemType resolved = type == null ? GolemType.MINER : type;
         if (resolved == GolemType.FARMER) {
             golem.setWeatheringState(WeatheringCopperState.OXIDIZED);
@@ -264,7 +279,6 @@ public final class GolemSpawnService {
             int otherRadius = Math.max(1, this.chestService.effectiveRadius(data));
             int otherX = (int) Math.floor(data.homeX());
             int otherZ = (int) Math.floor(data.homeZ());
-            // Зоны + внешний забор (radius+1) + запас padding (дефолт 3).
             if (Math.abs(homeX - otherX) <= r + otherRadius + padding
                     && Math.abs(homeZ - otherZ) <= r + otherRadius + padding) {
                 return true;
@@ -276,7 +290,7 @@ public final class GolemSpawnService {
     public void ensureAlive(SoulGolemData data) {
         CopperGolem live = resolveLiveEntity(data, null);
         if (live != null) {
-            applySoulEntityFlags(live, data.type());
+            refreshSoulEntity(live, data.type());
             return;
         }
         if (!this.respawning.add(data.id())) {
@@ -454,7 +468,7 @@ public final class GolemSpawnService {
     }
 
     private void configureExisting(CopperGolem entity, SoulGolemData data) {
-        applySoulEntityFlags(entity, data.type());
+        refreshSoulEntity(entity, data.type());
         clearHand(entity);
         equipTool(entity, data.type(), config().settings());
         entity.getPersistentDataContainer().set(this.keys.golemId(), PersistentDataType.STRING, data.id().toString());
@@ -634,7 +648,6 @@ public final class GolemSpawnService {
                     }
                     continue;
                 }
-                // Тот же golemId, но не актуальный entity — дубль после рестарта.
                 UUID bound = active.get().data().entityUuid();
                 if (bound != null && !bound.equals(copper.getUniqueId())) {
                     removeEntity(copper, golemId);
@@ -643,7 +656,6 @@ public final class GolemSpawnService {
         }
     }
 
-    /** Снос всех Soul CopperGolem (shutdown) — по PDC, не только по сохранённому UUID. */
     public void removeAllSoulEntities() {
         for (org.bukkit.World world : org.bukkit.Bukkit.getWorlds()) {
             for (CopperGolem copper : List.copyOf(world.getEntitiesByClass(CopperGolem.class))) {
@@ -662,9 +674,6 @@ public final class GolemSpawnService {
         }
     }
 
-    /**
-     * Живой медный голем этого Soul Golem: по entityUuid или по PDC golem_id.
-     */
     private CopperGolem resolveLiveEntity(SoulGolemData data, Location near) {
         if (data.entityUuid() != null) {
             Entity existing = org.bukkit.Bukkit.getEntity(data.entityUuid());
@@ -691,7 +700,6 @@ public final class GolemSpawnService {
             if (found == null) {
                 found = copper;
             } else {
-                // Лишние с тем же тегом — сносим, оставляем первого.
                 removeEntity(copper, data.id());
             }
         }
@@ -721,6 +729,7 @@ public final class GolemSpawnService {
     }
 
     private void removeEntity(CopperGolem copper, UUID golemId) {
+        this.gazeService.stop(copper.getUniqueId());
         GolemDisplay.remove(copper, golemId.toString(), this.keys);
         for (Entity passenger : List.copyOf(copper.getPassengers())) {
             passenger.remove();

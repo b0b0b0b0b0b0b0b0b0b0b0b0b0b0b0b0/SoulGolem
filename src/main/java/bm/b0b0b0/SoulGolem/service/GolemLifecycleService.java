@@ -53,7 +53,6 @@ public final class GolemLifecycleService {
         }
         this.plugin.getLogger().info("Loaded " + list.size() + " Soul Golems");
         this.spawnService.purgeOrphanEntities();
-        // Чанки/энтити подгружаются с задержкой — ещё раз снести дубли.
         PluginSchedulers.runGlobalLater(this.plugin, this.spawnService::purgeOrphanEntities, 40L);
         PluginSchedulers.runGlobalLater(this.plugin, this.spawnService::purgeOrphanEntities, 100L);
         this.minerTickService.start();
@@ -65,6 +64,7 @@ public final class GolemLifecycleService {
         this.farmerTickService.stop();
         this.minerTickService.flushAll();
         this.farmerTickService.flushAll();
+        this.spawnService.gazeService().shutdown();
         this.spawnService.removeAllSoulEntities();
         this.registry.clear();
     }

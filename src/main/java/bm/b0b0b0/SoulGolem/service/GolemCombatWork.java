@@ -132,7 +132,7 @@ public final class GolemCombatWork {
         if (GolemMovement.horizontalDistanceSquared(copper.getLocation(), target.getLocation()) <= REACH_SQ
                 && inTerritory(golem.data(), copper.getLocation().getBlock())) {
             copper.setVelocity(new Vector(0, copper.getVelocity().getY(), 0));
-            copper.lookAt(target);
+            GolemGaze.faceEntity(golem, target);
             tryAttack(golem, copper, target, weapon);
             return;
         }

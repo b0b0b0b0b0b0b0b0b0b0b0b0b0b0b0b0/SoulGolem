@@ -155,9 +155,18 @@ public final class MinerTickService {
             return;
         }
 
-        GolemSpawnService.applySoulEntityFlags(copper, golem.data().type());
+        this.context.spawnService().refreshSoulEntity(copper, golem.data().type());
 
         MinerState state = golem.state();
+        GolemAiMode.sync(
+                this.context.plugin(),
+                copper,
+                golem,
+                this.context.registry(),
+                this.context.keys(),
+                this.context.movement()
+        );
+        GolemGaze.dropPlayerGazeUnlessSitting(golem, state == MinerState.SITTING);
         if (golem.data().paused() || isStandingWork(state)) {
             this.context.movement().stop(copper);
         }
@@ -239,6 +248,24 @@ public final class MinerTickService {
                     return;
                 }
                 if (this.context.gateWatch().shouldStartClose(golem, true, miner.gateCloseDelayMs)) {
+                    if (state == MinerState.SITTING
+                            || state == MinerState.MOVING_TO_SEAT
+                            || state == MinerState.PLACING_SEAT) {
+                        this.context.seatWork().leaveBench(
+                                golem,
+                                copper,
+                                this.context.plugin(),
+                                this.context.registry(),
+                                this.context.keys()
+                        );
+                    } else if (state == MinerState.SHELTERING || state == MinerState.RESTING) {
+                        GolemAiMode.enable(
+                                this.context.plugin(),
+                                copper,
+                                this.context.registry(),
+                                this.context.keys()
+                        );
+                    }
                     golem.clearFetchFlags();
                     golem.state(MinerState.MOVING_TO_CLOSE_GATE);
                     this.support.continueCloseGate(golem, copper);
@@ -314,6 +341,7 @@ public final class MinerTickService {
                 default -> golem.state(MinerState.IDLE);
             }
         }
+        GolemGazeService.forceLook(copper, golem);
         GolemDisplay.refresh(
                 golem,
                 copper,

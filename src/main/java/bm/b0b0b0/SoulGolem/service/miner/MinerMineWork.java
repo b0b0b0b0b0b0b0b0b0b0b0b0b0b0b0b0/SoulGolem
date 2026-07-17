@@ -3,6 +3,7 @@ package bm.b0b0b0.SoulGolem.service.miner;
 import bm.b0b0b0.SoulGolem.config.settings.Settings;
 import bm.b0b0b0.SoulGolem.model.ActiveGolem;
 import bm.b0b0b0.SoulGolem.model.MinerState;
+import bm.b0b0b0.SoulGolem.service.GolemGaze;
 import bm.b0b0b0.SoulGolem.service.GolemGroundLootWork;
 import bm.b0b0b0.SoulGolem.service.GolemMovement;
 import bm.b0b0b0.SoulGolem.service.SoulChestService;
@@ -141,11 +142,12 @@ public final class MinerMineWork {
         }
         Location stand = target.clone().add(0.5D, 1.0D, 0.5D);
         if (GolemMovement.horizontalDistanceSquared(copper.getLocation(), stand) > 1.0D) {
-            this.ctx.walkTowards(copper, stand, golem.data());
+            this.ctx.walkTowards(copper, stand, golem);
             return;
         }
         copper.setVelocity(new Vector(0, 0, 0));
         golem.state(MinerState.MINING);
+        GolemGaze.faceBlock(golem, block);
         golem.mineTicksLeft(Math.max(1L, this.ctx.settings().mineDurationTicks));
         this.ctx.playMineFx(block);
     }
@@ -165,7 +167,7 @@ public final class MinerMineWork {
         long left = golem.mineTicksLeft() - this.ctx.settings().coordinatorPeriodTicks;
         golem.mineTicksLeft(left);
         if (left > 0L) {
-            copper.lookAt(block.getLocation().add(0.5D, 0.5D, 0.5D));
+            GolemGaze.faceBlock(golem, block);
             this.ctx.playMineFx(block);
             return;
         }
