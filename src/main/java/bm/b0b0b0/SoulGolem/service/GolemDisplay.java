@@ -25,6 +25,12 @@ public final class GolemDisplay {
         if (golem.data().paused()) {
             return "golem-status-paused";
         }
+        if (golem.data().energy() <= 0 || golem.fetchingFeed()) {
+            return "golem-status-hungry";
+        }
+        if (!golem.setupComplete() && bm.b0b0b0.SoulGolem.service.setup.GolemSetupWork.isSetupState(golem)) {
+            return "golem-status-setup";
+        }
         if (golem.data().type() == GolemType.FARMER) {
             return switch (golem.farmerState()) {
                 case WAITING_SEEDS -> "golem-status-waiting-seeds";
@@ -32,11 +38,20 @@ public final class GolemDisplay {
                 case MOVING_TO_PLANT, PLANTING -> "golem-status-planting";
                 case WAIT_GROWTH, WANDERING -> "golem-status-waiting-crop";
                 case PLACING_SEAT -> "golem-status-seat";
-                case MOVING_TO_SEAT -> carryingStairs(golem) ? "golem-status-seat" : "golem-status-sitting";
-                case SITTING -> "golem-status-sitting";
+                case MOVING_TO_SEAT -> carryingStairs(golem) ? "golem-status-seat" : "golem-status-sitting-farmer";
+                case SITTING -> "golem-status-sitting-farmer";
                 case MOVING_TO_CLEAR, CLEARING -> "golem-status-clearing";
+                case MOVING_TO_FENCE_CLEAR, CLEARING_FENCE -> "golem-status-fence-clear";
+                case MOVING_TO_FENCE, PLACING_FENCE -> "golem-status-fence";
+                case MOVING_TO_GATE, PLACING_GATE -> "golem-status-gate";
+                case MOVING_TO_CLOSE_GATE, CLOSING_GATE -> "golem-status-closing-gate";
+                case MOVING_TO_SHELTER, BUILDING_SHELTER, SHELTERING -> "golem-status-shelter";
+                case MOVING_TO_COMBAT, COMBATING -> "golem-status-combat";
                 case MOVING_TO_HARVEST, HARVESTING -> "golem-status-harvesting";
                 case MOVING_TO_CHEST -> {
+                    if (golem.fetchingFeed()) {
+                        yield "golem-status-hungry";
+                    }
                     if (golem.fetchingSeed()) {
                         yield "golem-status-planting";
                     }
@@ -46,8 +61,14 @@ public final class GolemDisplay {
                     if (golem.fetchingTorch()) {
                         yield "golem-status-torch";
                     }
+                    if (golem.fetchingFence() || golem.fetchingGate()) {
+                        yield golem.fetchingGate() ? "golem-status-gate" : "golem-status-fence";
+                    }
                     if (golem.fetchingBoneMeal()) {
                         yield "golem-status-bonemeal";
+                    }
+                    if (golem.fetchingWeapon()) {
+                        yield "golem-status-combat";
                     }
                     yield "golem-status-carrying";
                 }
@@ -55,27 +76,57 @@ public final class GolemDisplay {
                 case MOVING_TO_CRAFT, CRAFTING -> "golem-status-crafting";
                 case MOVING_TO_TORCH, PLACING_TORCH -> "golem-status-torch";
                 case MOVING_TO_BONEMEAL, APPLYING_BONEMEAL -> "golem-status-bonemeal";
-                case RESTING -> "golem-status-resting";
+                case RESTING -> "golem-status-waiting-crop";
+                case MOVING_TO_SETUP_CLEAR, SETUP_CLEAR,
+                     MOVING_TO_SETUP_BORDER, SETUP_BORDER,
+                     MOVING_TO_SETUP_CHEST, SETUP_CHEST,
+                     MOVING_TO_SETUP_CRAFT, SETUP_CRAFT -> "golem-status-setup";
             };
         }
         return switch (golem.state()) {
             case RESTING -> "golem-status-resting";
-            case WAITING_CHEST -> "golem-status-waiting-chest";
+            case WAITING_CHEST -> {
+                if (golem.pickaxeSwapBlocked()) {
+                    yield "golem-status-waiting-chest-pickaxe";
+                }
+                yield "golem-status-waiting-chest";
+            }
             case MINING, MOVING_TO_ORE -> "golem-status-mining";
             case MOVING_TO_CLEAR, CLEARING -> "golem-status-clearing";
+            case MOVING_TO_FENCE_CLEAR, CLEARING_FENCE -> "golem-status-fence-clear";
+            case MOVING_TO_FENCE, PLACING_FENCE -> "golem-status-fence";
+            case MOVING_TO_GATE, PLACING_GATE -> "golem-status-gate";
+            case MOVING_TO_CLOSE_GATE, CLOSING_GATE -> "golem-status-closing-gate";
+            case MOVING_TO_SHELTER, BUILDING_SHELTER, SHELTERING -> "golem-status-shelter";
+            case MOVING_TO_COMBAT, COMBATING -> "golem-status-combat";
             case MOVING_TO_TORCH, PLACING_TORCH -> "golem-status-torch";
             case PLACING_SEAT -> "golem-status-seat";
             case MOVING_TO_SEAT -> carryingStairs(golem) ? "golem-status-seat" : "golem-status-sitting";
             case SITTING -> "golem-status-sitting";
             case MOVING_TO_CHEST -> {
+                if (golem.fetchingFeed()) {
+                    yield "golem-status-hungry";
+                }
                 if (golem.fetchingTorch()) {
                     yield "golem-status-torch";
+                }
+                if (golem.fetchingFence() || golem.fetchingGate()) {
+                    yield golem.fetchingGate() ? "golem-status-gate" : "golem-status-fence";
                 }
                 if (golem.fetchingSeat()) {
                     yield "golem-status-seat";
                 }
+                if (golem.fetchingPickaxe()) {
+                    yield "golem-status-pickaxe";
+                }
+                if (golem.fetchingWeapon()) {
+                    yield "golem-status-combat";
+                }
                 yield "golem-status-carrying";
             }
+            case MOVING_TO_SETUP_CLEAR, SETUP_CLEAR,
+                 MOVING_TO_SETUP_BORDER, SETUP_BORDER,
+                 MOVING_TO_SETUP_CHEST, SETUP_CHEST -> "golem-status-setup";
             default -> "golem-status-working";
         };
     }
@@ -101,7 +152,9 @@ public final class GolemDisplay {
         }
         try {
             String key = statusKey(golem);
-            String plateKey = nameKey(golem) + "|" + key;
+            String time = restTimer(golem);
+            String energy = String.valueOf(golem.data().energy());
+            String plateKey = nameKey(golem) + "|" + key + "|" + energy + (time.isEmpty() ? "" : "|" + time);
             TextDisplay display = ensureNameplate(copper, golem.data().id().toString(), keys, style);
             TextDisplayStyle.applyGolemNameplate(display, style);
             Location at = nameplateLocation(copper, style);
@@ -112,10 +165,41 @@ public final class GolemDisplay {
             copper.customName(null);
             if (!plateKey.equals(golem.lastStatusKey())) {
                 golem.lastStatusKey(plateKey);
-                display.text(messages.golemNameplate(nameKey(golem), key));
+                if (time.isEmpty()) {
+                    display.text(messages.golemNameplate(
+                            nameKey(golem),
+                            key,
+                            MessageService.stub("energy", energy)
+                    ));
+                } else {
+                    display.text(messages.golemNameplate(
+                            nameKey(golem),
+                            key,
+                            MessageService.stub("energy", energy),
+                            MessageService.stub("time", time)
+                    ));
+                }
             }
         } catch (RuntimeException ignored) {
         }
+    }
+
+    private static String restTimer(ActiveGolem golem) {
+        if (golem.data().type() != GolemType.MINER) {
+            return "";
+        }
+        return switch (golem.state()) {
+            case RESTING, SITTING -> formatTicks(golem.restTicksLeft());
+            case MOVING_TO_SEAT -> carryingStairs(golem) ? "" : formatTicks(golem.restTicksLeft());
+            default -> "";
+        };
+    }
+
+    private static String formatTicks(long ticks) {
+        long seconds = Math.max(0L, (ticks + 19L) / 20L);
+        long minutes = seconds / 60L;
+        long rem = seconds % 60L;
+        return minutes + ":" + (rem < 10L ? "0" : "") + rem;
     }
 
     public static void refreshForce(

@@ -5,6 +5,7 @@ import bm.b0b0b0.SoulGolem.model.ActiveGolem;
 import bm.b0b0b0.SoulGolem.model.SoulGolemData;
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.Tag;
 import org.bukkit.block.Block;
 import org.bukkit.entity.CopperGolem;
 import org.bukkit.util.Vector;
@@ -40,41 +41,38 @@ public final class GolemMovement {
         }
 
         Location goal = resolveGoal(from, target, data, golem);
+        snapFeet(goal, data);
 
-        Vector delta = goal.toVector().subtract(from.toVector());
-        delta.setY(0.0D);
-        double length = delta.length();
-        if (length < 0.08D) {
-            if (golem != null && golem.pathWaypoint() != null
-                    && horizontalDistanceSquared(from, golem.pathWaypoint()) < 0.45D) {
-                golem.clearPathWaypoint();
-                goal = resolveGoal(from, target, data, golem);
-                delta = goal.toVector().subtract(from.toVector());
-                delta.setY(0.0D);
-                length = delta.length();
-            }
-            if (length < 0.08D) {
-                return;
+        if (blocked(data, goal)) {
+            Location open = stepAwayFromHazard(from, goal, target, data, 1.0D);
+            if (open != null) {
+                goal = open;
             }
         }
 
-        double step = Math.min(Math.max(0.55D, this.settings.walkSpeed * 0.65D), length);
-        Location next = from.clone().add(delta.normalize().multiply(step));
-        next.setY(goal.getY());
-        snapFeet(next, data);
-
-        if (blocked(data, next)) {
-            Location open = stepAwayFromHazard(from, goal, target, data, step);
-            if (open == null) {
-                return;
-            }
-            next = open;
+        if (horizontalDistanceSquared(from, goal) < 0.36D
+                && Math.abs(from.getY() - goal.getY()) < 1.25D) {
+            stop(copper);
+            return;
         }
 
-        next.setYaw(yawTo(from, goal));
-        next.setPitch(0.0F);
-        copper.teleport(next);
-        copper.lookAt(target);
+        double moodSpeed = 1.0D;
+        if (golem != null && this.farmAreaService != null) {
+            int radius = this.chestService.effectiveRadius(data);
+            int mood = this.farmAreaService.moodScore(data, radius);
+            moodSpeed = this.settings.moodWorkSpeedAt(mood);
+        }
+        double speed = Math.max(0.35D, this.settings.walkSpeed * Math.max(0.1D, moodSpeed));
+        copper.getPathfinder().moveTo(goal, speed);
+    }
+
+    public void stop(CopperGolem copper) {
+        if (copper == null || !copper.isValid()) {
+            return;
+        }
+        copper.getPathfinder().stopPathfinding();
+        Vector velocity = copper.getVelocity();
+        copper.setVelocity(new Vector(0.0D, velocity.getY(), 0.0D));
     }
 
     private Location resolveGoal(Location from, Location target, SoulGolemData data, ActiveGolem golem) {
@@ -106,6 +104,15 @@ public final class GolemMovement {
             Location beside = sidestepAroundStation(from, goal, data);
             if (beside != null) {
                 goal = beside;
+            } else {
+                Location detour = stableStationDetour(from, target, data);
+                if (detour != null) {
+                    if (golem != null) {
+                        golem.pathWaypoint(detour.clone());
+                        golem.pathGoal(target);
+                    }
+                    goal = detour;
+                }
             }
         }
         return goal;
@@ -179,28 +186,50 @@ public final class GolemMovement {
         if (this.chestService.collidesWithStation(data, location)) {
             return true;
         }
-        return this.farmAreaService != null && this.farmAreaService.isWaterBlock(data, location);
+        if (this.farmAreaService != null && this.farmAreaService.isWaterBlock(data, location)) {
+            return true;
+        }
+        Material feet = location.getBlock().getType();
+        return Tag.FENCES.isTagged(feet) || Tag.FENCE_GATES.isTagged(feet);
+    }
+
+    private static boolean isClimbableSolid(Material type) {
+        if (!type.isSolid()) {
+            return false;
+        }
+        if (SoulChestService.isChestLike(type) || type == Material.CRAFTING_TABLE || type == Material.WHEAT) {
+            return false;
+        }
+        if (FarmAreaService.isVegetation(type)) {
+            return false;
+        }
+        return !Tag.FENCES.isTagged(type) && !Tag.FENCE_GATES.isTagged(type);
     }
 
     private void snapFeet(Location next, SoulGolemData data) {
         int homeY = (int) Math.floor(data.homeY());
         Block feet = next.getBlock();
+        Material feetType = feet.getType();
+        if (Tag.FENCES.isTagged(feetType) || Tag.FENCE_GATES.isTagged(feetType)) {
+            next.setY(homeY + 1.0D);
+            return;
+        }
         Block below = feet.getRelative(0, -1, 0);
         Material belowType = below.getType();
         if (belowType.isSolid() || belowType == Material.FARMLAND) {
-            if (feet.getType().isSolid()
-                    && !SoulChestService.isChestLike(feet.getType())
-                    && feet.getType() != Material.CRAFTING_TABLE
-                    && feet.getType() != Material.WHEAT
-                    && !FarmAreaService.isVegetation(feet.getType())) {
+            if (isClimbableSolid(feetType)) {
                 next.setY(feet.getY() + 1.0D);
             } else {
                 next.setY(below.getY() + 1.0D);
             }
             return;
         }
-        if (feet.getType().isSolid() || feet.getType() == Material.FARMLAND) {
-            next.setY(feet.getY() + 1.0D);
+        if (feetType.isSolid() || feetType == Material.FARMLAND) {
+            if (Tag.FENCES.isTagged(feetType) || Tag.FENCE_GATES.isTagged(feetType)) {
+                next.setY(homeY + 1.0D);
+            } else {
+                next.setY(feet.getY() + 1.0D);
+            }
             return;
         }
         Block ground = next.getWorld().getBlockAt(next.getBlockX(), homeY, next.getBlockZ());
@@ -330,31 +359,81 @@ public final class GolemMovement {
         }
         Vector fromHazard = new Vector(from.getX() - cx, 0.0D, from.getZ() - cz);
         if (fromHazard.lengthSquared() < 0.0001D) {
+            fromHazard = new Vector(target.getX() - cx, 0.0D, target.getZ() - cz);
+        }
+        if (fromHazard.lengthSquared() < 0.0001D) {
             fromHazard = new Vector(1.0D, 0.0D, 0.0D);
         }
         fromHazard.normalize();
-        Vector left = new Vector(-fromHazard.getZ(), 0.0D, fromHazard.getX()).multiply(1.15D);
-        Vector right = left.clone().multiply(-1.0D);
-        Location optionLeft = from.clone().add(left);
-        Location optionRight = from.clone().add(right);
-        optionLeft.setY(target.getY());
-        optionRight.setY(target.getY());
-        snapFeet(optionLeft, data);
-        snapFeet(optionRight, data);
-        boolean leftOk = !blocked(data, optionLeft);
-        boolean rightOk = !blocked(data, optionRight);
-        if (leftOk && rightOk) {
-            return horizontalDistanceSquared(optionLeft, target) <= horizontalDistanceSquared(optionRight, target)
-                    ? optionLeft
-                    : optionRight;
+
+        Location best = null;
+        double bestScore = Double.MAX_VALUE;
+        double[] distances = {1.15D, 1.55D, 2.05D};
+        double[] angles = {90.0D, -90.0D, 45.0D, -45.0D, 135.0D, -135.0D, 180.0D};
+        for (double dist : distances) {
+            for (double degrees : angles) {
+                double rad = Math.toRadians(degrees);
+                double cos = Math.cos(rad);
+                double sin = Math.sin(rad);
+                Vector dir = new Vector(
+                        fromHazard.getX() * cos - fromHazard.getZ() * sin,
+                        0.0D,
+                        fromHazard.getX() * sin + fromHazard.getZ() * cos
+                ).multiply(dist);
+                Location option = from.clone().add(dir);
+                option.setY(target.getY());
+                snapFeet(option, data);
+                if (blocked(data, option) || this.chestService.collidesWithStation(data, option)) {
+                    continue;
+                }
+                if (pathCrossesStation(from, option, data)) {
+                    continue;
+                }
+                double score = horizontalDistanceSquared(option, target);
+                if (!pathCrossesStation(option, target, data)) {
+                    score -= 4.0D;
+                }
+                if (score < bestScore) {
+                    bestScore = score;
+                    best = option;
+                }
+            }
         }
-        if (leftOk) {
-            return optionLeft;
+        return best;
+    }
+
+    private Location stableStationDetour(Location from, Location target, SoulGolemData data) {
+        double cx = Math.floor(data.chestX()) + 0.5D;
+        double cz = Math.floor(data.chestZ()) + 0.5D;
+        double hy = target.getY();
+        double r = 1.75D;
+        double[][] offsets = {
+                {r, 0}, {-r, 0}, {0, r}, {0, -r},
+                {r, r}, {r, -r}, {-r, r}, {-r, -r},
+                {r * 1.4D, 0}, {-r * 1.4D, 0}, {0, r * 1.4D}, {0, -r * 1.4D}
+        };
+        Location best = null;
+        double bestScore = Double.MAX_VALUE;
+        for (double[] o : offsets) {
+            Location waypoint = new Location(from.getWorld(), cx + o[0], hy, cz + o[1]);
+            snapFeet(waypoint, data);
+            if (blocked(data, waypoint) || this.chestService.collidesWithStation(data, waypoint)) {
+                continue;
+            }
+            if (pathCrossesStation(from, waypoint, data)) {
+                continue;
+            }
+            double score = Math.sqrt(horizontalDistanceSquared(from, waypoint))
+                    + Math.sqrt(horizontalDistanceSquared(waypoint, target));
+            if (!pathCrossesStation(waypoint, target, data)) {
+                score -= 6.0D;
+            }
+            if (score < bestScore) {
+                bestScore = score;
+                best = waypoint;
+            }
         }
-        if (rightOk) {
-            return optionRight;
-        }
-        return null;
+        return best;
     }
 
     private static boolean crossesColumn(Location from, Location target, double cx, double cz, double radius) {

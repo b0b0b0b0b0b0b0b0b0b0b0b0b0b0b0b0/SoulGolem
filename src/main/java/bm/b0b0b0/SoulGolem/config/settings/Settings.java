@@ -5,8 +5,10 @@ import net.elytrium.serializer.annotations.Comment;
 import net.elytrium.serializer.annotations.CommentValue;
 import net.elytrium.serializer.annotations.NewLine;
 import net.elytrium.serializer.language.object.YamlSerializable;
+import bm.b0b0b0.SoulGolem.model.CropType;
 import java.util.ArrayList;
 import java.util.List;
+import org.bukkit.Material;
 
 public final class Settings extends YamlSerializable {
 
@@ -58,24 +60,24 @@ public final class Settings extends YamlSerializable {
     public long mineDurationTicks = 20L;
 
     @Comment({
-            @CommentValue("Fallback standing rest after deposit if no bench (ticks, 20 = 1s). Bench uses miner.seatRestTicks")
+            @CommentValue("Fallback standing rest after deposit if no bench (ticks). Prefer miner.standingRestTicks for miners")
     })
     public long restDurationTicks = 100L;
 
     @Comment({
             @CommentValue("Pickaxe in miner hand (MATERIAL)")
     })
-    public String pickaxeMaterial = "IRON_PICKAXE";
+    public String pickaxeMaterial = "COPPER_PICKAXE";
 
     @Comment({
             @CommentValue("Hoe in farmer hand (MATERIAL)")
     })
-    public String hoeMaterial = "IRON_HOE";
+    public String hoeMaterial = "COPPER_HOE";
 
     @Comment({
             @CommentValue("Shovel in farmer hand while clearing border (MATERIAL)")
     })
-    public String shovelMaterial = "IRON_SHOVEL";
+    public String shovelMaterial = "COPPER_SHOVEL";
 
     @NewLine
     @Comment({
@@ -91,7 +93,7 @@ public final class Settings extends YamlSerializable {
     @Comment({
             @CommentValue("How many ore blocks can exist in the work area at once")
     })
-    public int maxActiveOres = 2;
+    public int maxActiveOres = 4;
 
     @NewLine
     @Comment({
@@ -136,16 +138,62 @@ public final class Settings extends YamlSerializable {
     })
     public List<String> activationItems = new ArrayList<>();
 
+    @Comment({
+            @CommentValue("Prevent spawning when work area overlaps another golem")
+    })
+    public boolean preventAreaOverlap = true;
+
+    @Comment({
+            @CommentValue("Extra gap (blocks) between golem areas: homes closer than radiusA + radiusB + this are rejected")
+    })
+    public int areaOverlapPadding = 3;
+
     @NewLine
     @Comment({
-            @CommentValue("Base energy capacity (Phase 2 uses this)")
+            @CommentValue("Base energy capacity")
     })
     public int energyCapacity = 1000;
 
     @Comment({
-            @CommentValue("Energy drained per mined block (0 disables drain in MVP)")
+            @CommentValue("Energy drained per mined block")
     })
-    public int energyPerMine = 0;
+    public int energyPerMine = 8;
+
+    @Comment({
+            @CommentValue("Energy drained per farmer work action (till/plant/harvest/clear)")
+    })
+    public int energyPerFarmAction = 4;
+
+    @Comment({
+            @CommentValue("Feed item taken from chest to restore energy")
+    })
+    public String energyFeedItem = "COPPER_INGOT";
+
+    @Comment({
+            @CommentValue("Energy restored per feed item")
+    })
+    public int energyPerIngot = 200;
+
+    @Comment({
+            @CommentValue("When energy is at or below this, golem seeks copper from chest")
+    })
+    public int energyHungryThreshold = 150;
+
+    @NewLine
+    @Comment({
+            @CommentValue("Mood: min border torches for +1 mood point")
+    })
+    public int minTorchesForMood = 2;
+
+    @Comment({
+            @CommentValue("Work speed multiplier at mood 0 / 1 / 2 (seat + torches)")
+    })
+    public List<Double> moodWorkSpeed = defaultMoodWork();
+
+    @Comment({
+            @CommentValue("Rest duration multiplier at mood 0 / 1 / 2")
+    })
+    public List<Double> moodRestMultiplier = defaultMoodRest();
 
     @NewLine
     @Comment({
@@ -167,6 +215,36 @@ public final class Settings extends YamlSerializable {
 
     @NewLine
     public Miner miner = new Miner();
+
+    @NewLine
+    @Comment({
+            @CommentValue("Area defense: sword/axe from chest, ground loot, or right-click give; stay inside wool border")
+    })
+    public Combat combat = new Combat();
+
+    public static final class Combat {
+        @Comment({
+                @CommentValue("Attack mobs inside the work area when armed with a sword or axe")
+        })
+        public boolean enabled = true;
+
+        @Comment({
+                @CommentValue("Milliseconds between swings")
+        })
+        public long attackCooldownMs = 650;
+
+        public double damageWood = 3.0D;
+        public double damageGold = 3.0D;
+        public double damageStone = 4.0D;
+        public double damageIron = 5.0D;
+        public double damageDiamond = 6.0D;
+        public double damageNetherite = 7.0D;
+
+        @Comment({
+                @CommentValue("Extra damage when using an axe")
+        })
+        public double axeBonus = 1.0D;
+    }
 
     public static final class OreWeight {
         public String material = "IRON_ORE";
@@ -323,6 +401,11 @@ public final class Settings extends YamlSerializable {
         public boolean wanderWhileWaiting = true;
 
         @Comment({
+                @CommentValue("Pick up item drops inside the work area (including border and outer fence ring)")
+        })
+        public boolean collectGroundLoot = true;
+
+        @Comment({
                 @CommentValue("Use bone meal from chest on immature wheat (vanilla applyBoneMeal)")
         })
         public boolean useBoneMeal = true;
@@ -331,6 +414,11 @@ public final class Settings extends YamlSerializable {
                 @CommentValue("How many bone meal to take per fertilize trip")
         })
         public int boneMealPerTrip = 3;
+
+        @Comment({
+                @CommentValue("How many seeds to take per planting trip")
+        })
+        public int seedsPerTrip = 8;
 
         @Comment({
                 @CommentValue("Place torches from chest on farm corners only (not around the bench)")
@@ -361,6 +449,46 @@ public final class Settings extends YamlSerializable {
                 @CommentValue("Clear dirt/blocks sitting on top of the border before placing seat/torches")
         })
         public boolean clearBorder = true;
+
+        @Comment({
+                @CommentValue("Place wooden fence ring outside the wool border (radius+1) from chest materials")
+        })
+        public boolean placeFence = true;
+
+        @Comment({
+                @CommentValue("Fence material for the outer ring")
+        })
+        public String fenceMaterial = "OAK_FENCE";
+
+        @Comment({
+                @CommentValue("Fence gate material (placed opposite the chest)")
+        })
+        public String gateMaterial = "OAK_FENCE_GATE";
+
+        @Comment({
+                @CommentValue("How many fence posts to take/place per trip")
+        })
+        public int fencesPerTrip = 8;
+
+        @Comment({
+                @CommentValue("Auto-close the outer fence gate if left open (lazy: wait, then walk and close)")
+        })
+        public boolean gateAutoClose = true;
+
+        @Comment({
+                @CommentValue("How long the gate may stay open before the golem goes to close it (ms)")
+        })
+        public long gateCloseDelayMs = 2000;
+
+        @Comment({
+                @CommentValue("Build a free wool rain shelter (Г): 1 above NPC (+3); corner = fence+3 wool or 4 wool if no fence yet")
+        })
+        public boolean rainShelter = true;
+
+        @Comment({
+                @CommentValue("Supported crops: WHEAT, CARROT, POTATO")
+        })
+        public List<String> crops = defaultCrops();
     }
 
     public static final class Miner {
@@ -368,6 +496,16 @@ public final class Settings extends YamlSerializable {
                 @CommentValue("Clear grass/junk on border and floor before mining")
         })
         public boolean clearArea = true;
+
+        @Comment({
+                @CommentValue("Pick up item drops inside the work area (including border and outer fence ring)")
+        })
+        public boolean collectGroundLoot = true;
+
+        @Comment({
+                @CommentValue("Take iron/diamond/netherite pickaxe from chest: 2/3/4 blocks per rest trip")
+        })
+        public boolean pickaxeUpgrades = true;
 
         @Comment({
                 @CommentValue("Place torches from chest on mining area corners")
@@ -395,9 +533,120 @@ public final class Settings extends YamlSerializable {
         public boolean placeSeat = true;
 
         @Comment({
+                @CommentValue("Place wooden fence ring outside the wool border (radius+1) from chest materials")
+        })
+        public boolean placeFence = true;
+
+        @Comment({
+                @CommentValue("Fence material for the outer ring")
+        })
+        public String fenceMaterial = "OAK_FENCE";
+
+        @Comment({
+                @CommentValue("Fence gate material (placed opposite the chest)")
+        })
+        public String gateMaterial = "OAK_FENCE_GATE";
+
+        @Comment({
+                @CommentValue("How many fence posts to take/place per trip")
+        })
+        public int fencesPerTrip = 8;
+
+        @Comment({
+                @CommentValue("Auto-close the outer fence gate if left open (lazy: wait, then walk and close)")
+        })
+        public boolean gateAutoClose = true;
+
+        @Comment({
+                @CommentValue("How long the gate may stay open before the golem goes to close it (ms)")
+        })
+        public long gateCloseDelayMs = 2000;
+
+        @Comment({
+                @CommentValue("Build a free wool rain shelter (Г): 1 above NPC (+3); corner = fence+3 wool or 4 wool if no fence yet")
+        })
+        public boolean rainShelter = true;
+
+        @Comment({
+                @CommentValue("Standing rest without bench after deposit (ticks, 1.5 min = 1800)")
+        })
+        public long standingRestTicks = 1800L;
+
+        @Comment({
+                @CommentValue("While standing rest, how often to peek the chest for stairs to build a bench (ms)")
+        })
+        public long standingRestSeatCheckMs = 3000L;
+
+        @Comment({
                 @CommentValue("Sit on the bench to rest after depositing loot (ticks, 20s = 400)")
         })
         public long seatRestTicks = 400L;
+    }
+
+    private static List<String> defaultCrops() {
+        List<String> list = new ArrayList<>();
+        list.add("WHEAT");
+        list.add("CARROT");
+        list.add("POTATO");
+        return list;
+    }
+
+    private static List<Double> defaultMoodWork() {
+        List<Double> list = new ArrayList<>();
+        list.add(0.7D);
+        list.add(0.85D);
+        list.add(1.0D);
+        return list;
+    }
+
+    private static List<Double> defaultMoodRest() {
+        List<Double> list = new ArrayList<>();
+        list.add(1.5D);
+        list.add(1.25D);
+        list.add(1.0D);
+        return list;
+    }
+
+    public double moodWorkSpeedAt(int mood) {
+        return moodValue(this.moodWorkSpeed, mood, 1.0D);
+    }
+
+    public double moodRestMultiplierAt(int mood) {
+        return moodValue(this.moodRestMultiplier, mood, 1.0D);
+    }
+
+    public Material energyFeedMaterial() {
+        Material material = Material.matchMaterial(this.energyFeedItem);
+        if (material != null) {
+            return material;
+        }
+        Material copper = Material.matchMaterial("COPPER_INGOT");
+        return copper != null ? copper : Material.COPPER_INGOT;
+    }
+
+    public List<CropType> enabledCrops() {
+        List<CropType> list = new ArrayList<>();
+        if (this.farmer.crops != null) {
+            for (String raw : this.farmer.crops) {
+                CropType type = CropType.fromString(raw);
+                if (type != null && !list.contains(type)) {
+                    list.add(type);
+                }
+            }
+        }
+        if (list.isEmpty()) {
+            list.add(CropType.WHEAT);
+        }
+        return list;
+    }
+
+    private static double moodValue(List<Double> list, int mood, double fallback) {
+        if (list == null || list.isEmpty()) {
+            return fallback;
+        }
+        int index = Math.max(0, Math.min(mood, list.size() - 1));
+        Double value = list.get(index);
+        return value == null || value <= 0.0D ? fallback : value;
     }
 
     private static List<String> defaultPlacement() {

@@ -52,6 +52,10 @@ public final class GolemLifecycleService {
             }
         }
         this.plugin.getLogger().info("Loaded " + list.size() + " Soul Golems");
+        this.spawnService.purgeOrphanEntities();
+        // Чанки/энтити подгружаются с задержкой — ещё раз снести дубли.
+        PluginSchedulers.runGlobalLater(this.plugin, this.spawnService::purgeOrphanEntities, 40L);
+        PluginSchedulers.runGlobalLater(this.plugin, this.spawnService::purgeOrphanEntities, 100L);
         this.minerTickService.start();
         this.farmerTickService.start();
     }
@@ -61,14 +65,7 @@ public final class GolemLifecycleService {
         this.farmerTickService.stop();
         this.minerTickService.flushAll();
         this.farmerTickService.flushAll();
-        for (var golem : this.registry.all()) {
-            if (golem.data().entityUuid() != null) {
-                var entity = org.bukkit.Bukkit.getEntity(golem.data().entityUuid());
-                if (entity != null) {
-                    entity.remove();
-                }
-            }
-        }
+        this.spawnService.removeAllSoulEntities();
         this.registry.clear();
     }
 }

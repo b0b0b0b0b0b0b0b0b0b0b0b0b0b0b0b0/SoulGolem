@@ -6,19 +6,22 @@ import bm.b0b0b0.SoulGolem.message.MessageService;
 import bm.b0b0b0.SoulGolem.model.ActiveGolem;
 import bm.b0b0b0.SoulGolem.repository.GolemRepository;
 import bm.b0b0b0.SoulGolem.service.FarmAreaService;
+import bm.b0b0b0.SoulGolem.service.GolemCombatWork;
 import bm.b0b0b0.SoulGolem.service.GolemDisplay;
+import bm.b0b0b0.SoulGolem.service.GolemMovement;
 import bm.b0b0b0.SoulGolem.service.GolemRegistry;
 import bm.b0b0b0.SoulGolem.service.GolemSpawnService;
 import bm.b0b0b0.SoulGolem.service.SoulChestService;
 import bm.b0b0b0.SoulGolem.service.WorkAreaService;
 import bm.b0b0b0.SoulGolem.util.PluginKeys;
-import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.bukkit.GameMode;
 import org.bukkit.Material;
+import org.bukkit.Tag;
 import org.bukkit.block.Block;
 import org.bukkit.attribute.Attribute;
+import org.bukkit.entity.CopperGolem;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
@@ -27,13 +30,18 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockBreakEvent;
+import org.bukkit.event.block.BlockExplodeEvent;
+import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.entity.EntityChangeBlockEvent;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.entity.EntityDropItemEvent;
+import org.bukkit.event.entity.EntityExplodeEvent;
 import org.bukkit.event.entity.EntityTargetEvent;
 import org.bukkit.event.inventory.InventoryMoveItemEvent;
+import org.bukkit.event.player.PlayerBucketEmptyEvent;
+import org.bukkit.event.player.PlayerBucketFillEvent;
 import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.EquipmentSlot;
@@ -51,6 +59,7 @@ public final class GolemListener implements Listener {
     private final FarmAreaService farmAreaService;
     private final GolemRegistry registry;
     private final GolemRepository repository;
+    private final GolemCombatWork combat;
 
     public GolemListener(
             ConfigurationLoader configurationLoader,
@@ -72,10 +81,116 @@ public final class GolemListener implements Listener {
         this.farmAreaService = farmAreaService;
         this.registry = registry;
         this.repository = repository;
+        this.combat = new GolemCombatWork(
+                chestService,
+                workAreaService,
+                new GolemMovement(
+                        configurationLoader.config().settings(),
+                        chestService,
+                        farmAreaService
+                ),
+                () -> configurationLoader.config().settings()
+        );
     }
 
     private MessageService messages() {
         return this.configurationLoader.messages();
+    }
+
+    private boolean isAdmin(Player player) {
+        return player.isOp()
+                || player.hasPermission(this.configurationLoader.config().settings().permissions.admin);
+    }
+
+    private boolean isTerritory(Block block) {
+        if (block == null) {
+            return false;
+        }
+        if (this.farmAreaService.isFarmProtected(block)) {
+            return true;
+        }
+        if (this.workAreaService.isTerritoryBlock(
+                block,
+                this.registry.all(),
+                this.chestService::effectiveRadius
+        )) {
+            return true;
+        }
+        for (ActiveGolem golem : this.registry.all()) {
+            if (this.farmAreaService.isOwnSeatBlock(block, golem.data())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean canBypassTerritory(Player player) {
+        return isAdmin(player) && player.getGameMode() == GameMode.CREATIVE && player.isSneaking();
+    }
+
+    private Optional<ActiveGolem> findTerritoryGolem(Block block) {
+        if (block == null) {
+            return Optional.empty();
+        }
+        Optional<UUID> mapped = this.workAreaService.findTerritoryGolemId(
+                block,
+                this.registry.all(),
+                this.chestService::effectiveRadius
+        );
+        if (mapped.isPresent()) {
+            return this.registry.byId(mapped.get());
+        }
+        for (ActiveGolem golem : this.registry.all()) {
+            if (this.farmAreaService.isOwnSeatBlock(block, golem.data())) {
+                return Optional.of(golem);
+            }
+            if (this.workAreaService.containsBlock(
+                    golem.data(),
+                    this.chestService.effectiveRadius(golem.data()),
+                    block
+            )) {
+                return Optional.of(golem);
+            }
+        }
+        return Optional.empty();
+    }
+
+    private boolean isTerritoryOwner(Player player, Block block) {
+        if (player == null || block == null) {
+            return false;
+        }
+        Optional<ActiveGolem> golem = findTerritoryGolem(block);
+        return golem.isPresent() && player.getUniqueId().equals(golem.get().data().ownerUuid());
+    }
+
+    private boolean isOwnerCropBreak(Player player, Block block) {
+        return isTerritoryOwner(player, block) && FarmAreaService.isAnyCrop(block.getType());
+    }
+
+    private boolean isOwnerGateUse(Player player, Block block) {
+        return isTerritoryOwner(player, block)
+                && block != null
+                && Tag.FENCE_GATES.isTagged(block.getType());
+    }
+
+    private boolean isAllowedStationUse(Player player, Block block) {
+        if (!this.chestService.isSoulChest(block) && !isRegisteredCraftTable(block)) {
+            return false;
+        }
+        if (isAdmin(player)) {
+            return true;
+        }
+        UUID owner = this.chestService.ownerFromChest(block);
+        if (owner == null) {
+            UUID golemId = stationGolemId(block);
+            if (golemId != null) {
+                Optional<ActiveGolem> active = this.registry.byId(golemId);
+                if (active.isPresent()) {
+                    owner = active.get().data().ownerUuid();
+                }
+            }
+        }
+        return owner != null && owner.equals(player.getUniqueId());
     }
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
@@ -102,22 +217,132 @@ public final class GolemListener implements Listener {
     public void onProtectedBreak(BlockBreakEvent event) {
         Block block = event.getBlock();
         Player player = event.getPlayer();
-        boolean admin = player.hasPermission(this.configurationLoader.config().settings().permissions.admin);
 
-        if (this.chestService.isSoulChest(block) || isRegisteredCraftTable(block) || this.chestService.isSoulCraftingTable(block)) {
+        UUID stationGolemId = stationGolemId(block);
+        if (stationGolemId != null) {
             event.setCancelled(true);
+            if (isAdmin(player) && (player.getGameMode() == GameMode.CREATIVE || player.isSneaking())) {
+                Optional<ActiveGolem> active = this.registry.byId(stationGolemId);
+                if (active.isPresent()) {
+                    this.spawnService.removeGolem(stationGolemId, player);
+                } else {
+                    this.spawnService.cleanupOrphan(stationGolemId, block.getLocation(), player);
+                }
+                return;
+            }
             messages().send(player, "protect-station");
             return;
         }
 
-        if (!this.workAreaService.isProtected(block) && !this.farmAreaService.isFarmProtected(block)) {
+        if (!isTerritory(block)) {
             return;
         }
-        if (admin) {
+        if (canBypassTerritory(player) || isOwnerCropBreak(player, block)) {
             return;
         }
         event.setCancelled(true);
         messages().send(player, "protect-work-block");
+    }
+
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onProtectedPlace(BlockPlaceEvent event) {
+        Block block = event.getBlockPlaced();
+        if (!isTerritory(block)) {
+            return;
+        }
+        Player player = event.getPlayer();
+        if (canBypassTerritory(player)) {
+            return;
+        }
+        event.setCancelled(true);
+        messages().send(player, "protect-work-block");
+    }
+
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onProtectedInteract(PlayerInteractEvent event) {
+        if (event.getHand() != EquipmentSlot.HAND) {
+            return;
+        }
+        if (event.getAction() != Action.RIGHT_CLICK_BLOCK && event.getAction() != Action.LEFT_CLICK_BLOCK) {
+            return;
+        }
+        Block block = event.getClickedBlock();
+        if (block == null || !isTerritory(block)) {
+            return;
+        }
+        if (this.statueFactory.isStatue(event.getItem())) {
+            return;
+        }
+        Player player = event.getPlayer();
+        if (canBypassTerritory(player)) {
+            return;
+        }
+        if (event.getAction() == Action.RIGHT_CLICK_BLOCK && isAllowedStationUse(player, block)) {
+            return;
+        }
+        if (event.getAction() == Action.LEFT_CLICK_BLOCK && isOwnerCropBreak(player, block)) {
+            return;
+        }
+        if (event.getAction() == Action.RIGHT_CLICK_BLOCK && isOwnerGateUse(player, block)) {
+            return;
+        }
+        event.setCancelled(true);
+        messages().send(player, "protect-work-block");
+    }
+
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onBucketEmpty(PlayerBucketEmptyEvent event) {
+        Block block = event.getBlock();
+        if (!isTerritory(block) && !isTerritory(block.getRelative(event.getBlockFace()))) {
+            return;
+        }
+        if (canBypassTerritory(event.getPlayer())) {
+            return;
+        }
+        event.setCancelled(true);
+        messages().send(event.getPlayer(), "protect-work-block");
+    }
+
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onBucketFill(PlayerBucketFillEvent event) {
+        Block block = event.getBlock();
+        if (!isTerritory(block)) {
+            return;
+        }
+        if (canBypassTerritory(event.getPlayer())) {
+            return;
+        }
+        event.setCancelled(true);
+        messages().send(event.getPlayer(), "protect-work-block");
+    }
+
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onEntityExplode(EntityExplodeEvent event) {
+        event.blockList().removeIf(this::isTerritory);
+    }
+
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onBlockExplode(BlockExplodeEvent event) {
+        event.blockList().removeIf(this::isTerritory);
+    }
+
+    private UUID stationGolemId(Block block) {
+        UUID fromChest = this.chestService.golemIdFromChest(block);
+        if (fromChest != null) {
+            return fromChest;
+        }
+        if (this.chestService.isSoulCraftingTable(block) || isRegisteredCraftTable(block)) {
+            UUID fromCraft = this.chestService.golemIdFromCraft(block);
+            if (fromCraft != null) {
+                return fromCraft;
+            }
+            for (ActiveGolem golem : this.registry.all()) {
+                if (this.chestService.isSoulCraftingTable(block, golem.data())) {
+                    return golem.data().id();
+                }
+            }
+        }
+        return null;
     }
 
     private boolean isRegisteredCraftTable(Block block) {
@@ -164,8 +389,7 @@ public final class GolemListener implements Listener {
             return;
         }
         ActiveGolem golem = optional.get();
-        boolean admin = player.hasPermission(this.configurationLoader.config().settings().permissions.admin);
-        if (!admin && !golem.data().ownerUuid().equals(player.getUniqueId())) {
+        if (!isAdmin(player) && !golem.data().ownerUuid().equals(player.getUniqueId())) {
             messages().send(player, "protect-not-owner");
             return;
         }
@@ -174,10 +398,26 @@ public final class GolemListener implements Listener {
             golem.data().paused(paused);
             golem.markDirty();
             this.repository.save(golem.data());
-            if (event.getRightClicked() instanceof org.bukkit.entity.CopperGolem copper) {
+            if (event.getRightClicked() instanceof CopperGolem copper) {
                 GolemDisplay.refreshForce(golem, copper, messages(), this.keys, this.configurationLoader.config().settings().visuals.textDisplays);
             }
             messages().send(player, paused ? "golem-paused" : "golem-resumed");
+            return;
+        }
+        ItemStack hand = player.getInventory().getItemInMainHand();
+        if (event.getRightClicked() instanceof CopperGolem copper
+                && hand != null
+                && GolemCombatWork.isWeapon(hand.getType())
+                && this.combat.acceptWeapon(golem, copper, player, hand)) {
+            this.repository.save(golem.data());
+            GolemDisplay.refreshForce(
+                    golem,
+                    copper,
+                    messages(),
+                    this.keys,
+                    this.configurationLoader.config().settings().visuals.textDisplays
+            );
+            messages().send(player, "golem-armed");
         }
     }
 
@@ -227,11 +467,16 @@ public final class GolemListener implements Listener {
             Optional<ActiveGolem> optional = this.registry.byId(UUID.fromString(raw));
             if (optional.isEmpty()) {
                 event.setCancelled(true);
+                if (isAdmin(player) || player.getGameMode() == GameMode.CREATIVE || player.isSneaking()) {
+                    this.spawnService.cleanupOrphan(UUID.fromString(raw), entity.getLocation(), player);
+                    if (entity.isValid()) {
+                        entity.remove();
+                    }
+                }
                 return;
             }
             ActiveGolem golem = optional.get();
-            boolean admin = player.hasPermission(this.configurationLoader.config().settings().permissions.admin);
-            if (!admin && !golem.data().ownerUuid().equals(player.getUniqueId())) {
+            if (!isAdmin(player) && !golem.data().ownerUuid().equals(player.getUniqueId())) {
                 event.setCancelled(true);
                 messages().send(player, "protect-not-owner");
                 return;
@@ -258,5 +503,23 @@ public final class GolemListener implements Listener {
             return;
         }
         event.setCancelled(true);
+    }
+
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onPlayerTrample(EntityChangeBlockEvent event) {
+        if (!(event.getEntity() instanceof Player player)) {
+            return;
+        }
+        if (event.getBlock().getType() != Material.FARMLAND) {
+            return;
+        }
+        if (!isTerritory(event.getBlock())) {
+            return;
+        }
+        if (canBypassTerritory(player) || isTerritoryOwner(player, event.getBlock())) {
+            return;
+        }
+        event.setCancelled(true);
+        messages().send(player, "protect-work-block");
     }
 }

@@ -32,7 +32,7 @@ public final class StatueItemFactory {
     public ItemStack create(int amount, GolemType type) {
         GolemType resolved = type == null ? GolemType.MINER : type;
         MessageService messageService = this.messages.get();
-        ItemStack stack = new ItemStack(Material.COPPER_BLOCK, Math.max(1, amount));
+        ItemStack stack = new ItemStack(statueMaterial(resolved), Math.max(1, amount));
         ItemMeta meta = stack.getItemMeta();
         String nameKey = resolved == GolemType.FARMER ? "statue-name-farmer" : "statue-name-miner";
         String loreKey = resolved == GolemType.FARMER ? "statue-lore-farmer" : "statue-lore-miner";
@@ -46,6 +46,15 @@ public final class StatueItemFactory {
         meta.getPersistentDataContainer().set(this.keys.statueType(), PersistentDataType.STRING, resolved.name());
         stack.setItemMeta(meta);
         return stack;
+    }
+
+    private static Material statueMaterial(GolemType type) {
+        if (type == GolemType.FARMER) {
+            Material oxidized = Material.matchMaterial("OXIDIZED_COPPER_GOLEM_STATUE");
+            return oxidized != null ? oxidized : Material.COPPER_BLOCK;
+        }
+        Material statue = Material.matchMaterial("COPPER_GOLEM_STATUE");
+        return statue != null ? statue : Material.COPPER_BLOCK;
     }
 
     public GolemType typeOf(ItemStack stack) {

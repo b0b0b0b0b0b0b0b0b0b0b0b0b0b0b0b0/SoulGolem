@@ -172,6 +172,82 @@ public final class WorkAreaService {
         }
     }
 
+    public void placeBorderBlock(SoulGolemData data, int x, int homeY, int z) {
+        World world = Bukkit.getWorld(data.worldName());
+        if (world == null || !settings().borderEnabled) {
+            return;
+        }
+        placeBorderFloorExact(world, x, homeY, z, resolveBorder(), data.id());
+    }
+
+    private void placeBorderFloorExact(World world, int x, int homeY, int z, Material border, UUID golemId) {
+        Block atHome = world.getBlockAt(x, homeY, z);
+        Block aboveHome = world.getBlockAt(x, homeY + 1, z);
+        if (SoulChestService.isChestLike(atHome.getType()) || atHome.getType() == Material.CRAFTING_TABLE) {
+            ensureSupportUnder(atHome, border, golemId);
+            return;
+        }
+        if (SoulChestService.isChestLike(aboveHome.getType()) || aboveHome.getType() == Material.CRAFTING_TABLE) {
+            ensureSupportUnder(aboveHome, border, golemId);
+            return;
+        }
+        if (atHome.getType() == border) {
+            return;
+        }
+        if (FarmAreaService.isVegetation(aboveHome.getType()) || aboveHome.getType() == Material.SNOW) {
+            aboveHome.setType(Material.AIR, false);
+        }
+        Block upper = world.getBlockAt(x, homeY + 2, z);
+        if (FarmAreaService.isVegetation(upper.getType()) || upper.getType() == Material.SNOW) {
+            upper.setType(Material.AIR, false);
+        }
+        BlockPos pos = BlockPos.of(atHome);
+        this.originals.putIfAbsent(pos, atHome.getType());
+        atHome.setType(border, false);
+        protect(atHome, golemId);
+    }
+
+    public List<Location> borderFloorSlots(SoulGolemData data, int radius) {
+        List<Location> list = new ArrayList<>();
+        World world = Bukkit.getWorld(data.worldName());
+        if (world == null || !settings().borderEnabled) {
+            return list;
+        }
+        int homeX = (int) Math.floor(data.homeX());
+        int homeY = (int) Math.floor(data.homeY());
+        int homeZ = (int) Math.floor(data.homeZ());
+        int r = Math.max(1, radius);
+        int minX = homeX - r;
+        int maxX = homeX + r;
+        int minZ = homeZ - r;
+        int maxZ = homeZ + r;
+        Material border = resolveBorder();
+        for (int x = minX; x <= maxX; x++) {
+            addBorderSlotIfNeeded(list, world, x, homeY, minZ, border);
+        }
+        for (int z = minZ + 1; z <= maxZ; z++) {
+            addBorderSlotIfNeeded(list, world, maxX, homeY, z, border);
+        }
+        for (int x = maxX - 1; x >= minX; x--) {
+            addBorderSlotIfNeeded(list, world, x, homeY, maxZ, border);
+        }
+        for (int z = maxZ - 1; z > minZ; z--) {
+            addBorderSlotIfNeeded(list, world, minX, homeY, z, border);
+        }
+        return list;
+    }
+
+    private static void addBorderSlotIfNeeded(List<Location> list, World world, int x, int homeY, int z, Material border) {
+        Block ground = world.getBlockAt(x, homeY, z);
+        if (ground.getType() == border) {
+            return;
+        }
+        if (SoulChestService.isChestLike(ground.getType()) || ground.getType() == Material.CRAFTING_TABLE) {
+            return;
+        }
+        list.add(ground.getLocation());
+    }
+
     private void placeBorderFloor(World world, int x, int homeY, int z, Material border, UUID golemId) {
         Block atHome = world.getBlockAt(x, homeY, z);
         Block aboveHome = world.getBlockAt(x, homeY + 1, z);
@@ -315,8 +391,48 @@ public final class WorkAreaService {
         }
     }
 
-    public void removeGolemArea(SoulGolemData data, int radius) {
+    public void removeGolemArea(SoulGolemData data, int radius, OreTableService oreTable) {
         clear(data.id());
+        World world = Bukkit.getWorld(data.worldName());
+        if (world == null) {
+            return;
+        }
+        int homeX = (int) Math.floor(data.homeX());
+        int homeY = (int) Math.floor(data.homeY());
+        int homeZ = (int) Math.floor(data.homeZ());
+        int r = Math.max(1, radius);
+        Material border = resolveBorder();
+        Material surface = Material.GRASS_BLOCK;
+
+        for (int x = homeX - r; x <= homeX + r; x++) {
+            for (int z = homeZ - r; z <= homeZ + r; z++) {
+                if (isStationColumn(data, world, x, homeZ, z)) {
+                    continue;
+                }
+                Block ground = world.getBlockAt(x, homeY, z);
+                Material type = ground.getType();
+                if (oreTable != null && oreTable.isOre(type)) {
+                    ground.setType(surface, false);
+                } else if (type == border) {
+                    ground.setType(surface, false);
+                }
+            }
+        }
+    }
+
+    private static boolean isStationColumn(SoulGolemData data, World world, int x, int homeZ, int z) {
+        if (data.hasCraftStation()
+                && x == (int) Math.floor(data.craftX())
+                && z == (int) Math.floor(data.craftZ())) {
+            return true;
+        }
+        int cx = (int) Math.floor(data.chestX());
+        int cz = (int) Math.floor(data.chestZ());
+        return x == cx && z == cz;
+    }
+
+    public void removeGolemArea(SoulGolemData data, int radius) {
+        removeGolemArea(data, radius, null);
     }
 
     public Location homeLocation(SoulGolemData data) {
@@ -325,6 +441,74 @@ public final class WorkAreaService {
             return null;
         }
         return new Location(world, data.homeX() + 0.5D, data.homeY(), data.homeZ() + 0.5D);
+    }
+
+    public boolean containsBlock(SoulGolemData data, int radius, Block block) {
+        if (block == null || data == null || block.getWorld() == null) {
+            return false;
+        }
+        if (!block.getWorld().getName().equals(data.worldName())) {
+            return false;
+        }
+        int r = Math.max(1, radius);
+        int homeX = (int) Math.floor(data.homeX());
+        int homeY = (int) Math.floor(data.homeY());
+        int homeZ = (int) Math.floor(data.homeZ());
+        int x = block.getX();
+        int y = block.getY();
+        int z = block.getZ();
+        if (Math.abs(x - homeX) > r || Math.abs(z - homeZ) > r) {
+            return false;
+        }
+        return y >= homeY - 2 && y <= homeY + 8;
+    }
+
+    public java.util.Optional<UUID> findTerritoryGolemId(
+            Block block,
+            Iterable<bm.b0b0b0.SoulGolem.model.ActiveGolem> golems,
+            java.util.function.ToIntFunction<SoulGolemData> radiusOf
+    ) {
+        if (block == null) {
+            return java.util.Optional.empty();
+        }
+        UUID mapped = this.protectedBlocks.get(BlockPos.of(block));
+        if (mapped != null) {
+            return java.util.Optional.of(mapped);
+        }
+        for (bm.b0b0b0.SoulGolem.model.ActiveGolem golem : golems) {
+            SoulGolemData data = golem.data();
+            if (containsBlock(data, radiusOf.applyAsInt(data), block)) {
+                return java.util.Optional.of(data.id());
+            }
+        }
+        return java.util.Optional.empty();
+    }
+
+    public boolean isTerritoryBlock(
+            Block block,
+            Iterable<bm.b0b0b0.SoulGolem.model.ActiveGolem> golems,
+            java.util.function.ToIntFunction<SoulGolemData> radiusOf
+    ) {
+        return findTerritoryGolemId(block, golems, radiusOf).isPresent();
+    }
+
+    public void reclaimTerritory(SoulGolemData data, int radius) {
+        World world = Bukkit.getWorld(data.worldName());
+        if (world == null) {
+            return;
+        }
+        int r = Math.max(1, radius);
+        int homeX = (int) Math.floor(data.homeX());
+        int homeY = (int) Math.floor(data.homeY());
+        int homeZ = (int) Math.floor(data.homeZ());
+        UUID golemId = data.id();
+        for (int x = homeX - r; x <= homeX + r; x++) {
+            for (int z = homeZ - r; z <= homeZ + r; z++) {
+                for (int y = homeY - 2; y <= homeY + 8; y++) {
+                    protect(world.getBlockAt(x, y, z), golemId);
+                }
+            }
+        }
     }
 
     private Material resolveBorder() {

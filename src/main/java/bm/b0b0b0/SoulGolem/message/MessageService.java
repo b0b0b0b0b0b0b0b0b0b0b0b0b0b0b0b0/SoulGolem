@@ -3,6 +3,7 @@ package bm.b0b0b0.SoulGolem.message;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -118,6 +119,25 @@ public final class MessageService {
         return MINI.deserialize(raw, resolvers);
     }
 
+    public Component componentFromRaw(String raw, TagResolver... resolvers) {
+        if (raw == null || raw.isEmpty()) {
+            return Component.empty();
+        }
+        return MINI.deserialize(raw.replace("<prefix>", this.prefixRaw), resolvers);
+    }
+
+    public List<Component> componentLines(String key, TagResolver... resolvers) {
+        List<String> lines = rawListLines(key);
+        if (lines.isEmpty()) {
+            return List.of();
+        }
+        List<Component> result = new ArrayList<>(lines.size());
+        for (String line : lines) {
+            result.add(componentFromRaw(line, resolvers));
+        }
+        return result;
+    }
+
     public void send(CommandSender sender, String key, TagResolver... resolvers) {
         sender.sendMessage(component(key, resolvers));
     }
@@ -139,9 +159,15 @@ public final class MessageService {
     }
 
     public Component golemNameplate(String nameKey, String statusKey) {
+        return golemNameplate(nameKey, statusKey, new TagResolver[0]);
+    }
+
+    public Component golemNameplate(String nameKey, String statusKey, TagResolver... resolvers) {
         return MINI.deserialize(raw(nameKey))
                 .appendNewline()
-                .append(MINI.deserialize(raw(statusKey)));
+                .append(MINI.deserialize(raw(statusKey), resolvers))
+                .appendNewline()
+                .append(MINI.deserialize(raw("golem-energy"), resolvers));
     }
 
     public List<String> rawListLines(String key) {

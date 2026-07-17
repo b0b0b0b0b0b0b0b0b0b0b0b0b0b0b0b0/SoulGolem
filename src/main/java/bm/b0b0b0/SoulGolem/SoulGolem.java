@@ -5,13 +5,16 @@ import bm.b0b0b0.SoulGolem.config.ConfigurationLoader;
 import bm.b0b0b0.SoulGolem.config.PluginConfig;
 import bm.b0b0b0.SoulGolem.database.DatabaseManager;
 import bm.b0b0b0.SoulGolem.item.StatueItemFactory;
+import bm.b0b0b0.SoulGolem.listener.GolemGuiListener;
 import bm.b0b0b0.SoulGolem.listener.GolemListener;
 import bm.b0b0b0.SoulGolem.repository.GolemRepository;
 import bm.b0b0b0.SoulGolem.repository.SqlGolemRepository;
 import bm.b0b0b0.SoulGolem.scheduler.PluginSchedulers;
 import bm.b0b0b0.SoulGolem.service.FarmAreaService;
 import bm.b0b0b0.SoulGolem.service.FarmerTickService;
+import bm.b0b0b0.SoulGolem.service.GolemControlService;
 import bm.b0b0b0.SoulGolem.service.GolemLifecycleService;
+import bm.b0b0b0.SoulGolem.gui.GolemGuiService;
 import bm.b0b0b0.SoulGolem.service.GolemRegistry;
 import bm.b0b0b0.SoulGolem.service.GolemSpawnService;
 import bm.b0b0b0.SoulGolem.service.MinerTickService;
@@ -47,6 +50,7 @@ public final class SoulGolem extends JavaPlugin {
         GolemRegistry registry = new GolemRegistry();
         OreTableService oreTable = new OreTableService(config);
         SoulChestService chestService = new SoulChestService(
+                this,
                 keys,
                 config,
                 this.configurationLoader.messages().raw("chest-name"),
@@ -126,6 +130,21 @@ public final class SoulGolem extends JavaPlugin {
                 farmerTickService
         );
 
+        GolemControlService controlService = new GolemControlService(
+                this,
+                this.configurationLoader,
+                farmAreaService,
+                chestService,
+                repository,
+                spawnService,
+                keys
+        );
+        GolemGuiService guiService = new GolemGuiService(
+                this.configurationLoader,
+                registry,
+                controlService
+        );
+
         getServer().getPluginManager().registerEvents(new GolemListener(
                 this.configurationLoader,
                 keys,
@@ -137,13 +156,14 @@ public final class SoulGolem extends JavaPlugin {
                 registry,
                 repository
         ), this);
+        getServer().getPluginManager().registerEvents(new GolemGuiListener(), this);
 
         SoulGolemCommand command = new SoulGolemCommand(
                 this.configurationLoader,
                 statueFactory,
-                registry,
                 oreTable,
-                chestService
+                chestService,
+                guiService
         );
         PluginCommand pluginCommand = getCommand("soulgolem");
         pluginCommand.setExecutor(command);

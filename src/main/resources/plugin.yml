@@ -7,7 +7,7 @@ folia-supported: true
 commands:
   soulgolem:
     description: SoulGolem administration
-    usage: /soulgolem <give|reload|list>
+    usage: /soulgolem <give|reload|list|gui>
     aliases: [ sg, sgol ]
 permissions:
   soulgolem.admin:

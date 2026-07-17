@@ -1,17 +1,17 @@
 package bm.b0b0b0.SoulGolem.config.settings;
 
+import java.util.ArrayList;
+import java.util.List;
 import net.elytrium.serializer.SerializerConfig;
 import net.elytrium.serializer.annotations.Comment;
 import net.elytrium.serializer.annotations.CommentValue;
 import net.elytrium.serializer.language.object.YamlSerializable;
-import java.util.ArrayList;
-import java.util.List;
 
-public final class GuiGeneralSettings extends YamlSerializable {
+public final class GuiConfirmSettings extends YamlSerializable {
 
     private static final SerializerConfig SERIALIZER_CONFIG = new SerializerConfig.Builder().build();
 
-    public GuiGeneralSettings() {
+    public GuiConfirmSettings() {
         super(SERIALIZER_CONFIG);
     }
 
@@ -21,32 +21,20 @@ public final class GuiGeneralSettings extends YamlSerializable {
     public int size = 27;
 
     public String fillerMaterial = "GRAY_STAINED_GLASS_PANE";
+    public String warningMaterial = "BARRIER";
+    public String yesMaterial = "LIME_WOOL";
+    public String noMaterial = "RED_WOOL";
 
-    public int infoSlot = 11;
-    public String infoMaterial = "COPPER_INGOT";
-
-    public int pauseSlot = 13;
-    public String pauseMaterial = "REDSTONE";
-    public String resumeMaterial = "LIME_DYE";
-
-    public int teleportSlot = 4;
-    public String teleportMaterial = "ENDER_PEARL";
-
-    public int upgradesSlot = 15;
-    public String upgradesMaterial = "ANVIL";
-
-    public int deleteSlot = 15;
-    public String deleteMaterial = "TNT";
-
-    public int backSlot = 22;
-    public String backMaterial = "ARROW";
+    public int warningSlot = 13;
+    public int yesSlot = 11;
+    public int noSlot = 15;
 
     public List<Integer> fillerSlots = defaultFillerSlots();
 
     private static List<Integer> defaultFillerSlots() {
         List<Integer> slots = new ArrayList<>();
         for (int i = 0; i < 27; i++) {
-            if (i != 4 && i != 11 && i != 13 && i != 15 && i != 22) {
+            if (i != 11 && i != 13 && i != 15) {
                 slots.add(i);
             }
         }

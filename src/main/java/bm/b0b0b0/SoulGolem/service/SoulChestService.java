@@ -3,10 +3,13 @@ package bm.b0b0b0.SoulGolem.service;
 import bm.b0b0b0.SoulGolem.config.PluginConfig;
 import bm.b0b0b0.SoulGolem.config.settings.Settings;
 import bm.b0b0b0.SoulGolem.model.SoulGolemData;
+import bm.b0b0b0.SoulGolem.scheduler.PluginSchedulers;
 import bm.b0b0b0.SoulGolem.util.PluginKeys;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.bukkit.Bukkit;
@@ -16,22 +19,30 @@ import org.bukkit.Tag;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.block.Chest;
+import org.bukkit.block.Lidded;
 import org.bukkit.block.TileState;
+import org.bukkit.block.data.BlockData;
+import org.bukkit.block.data.Directional;
 import org.bukkit.entity.TextDisplay;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.persistence.PersistentDataType;
+import org.bukkit.plugin.Plugin;
 
 public final class SoulChestService {
 
     private static final MiniMessage MINI = MiniMessage.miniMessage();
+    private static final long LID_CLOSE_DELAY_TICKS = 15L;
 
+    private final Plugin plugin;
     private final PluginKeys keys;
     private final PluginConfig config;
+    private final Map<UUID, Integer> lidCloseEpoch = new ConcurrentHashMap<>();
     private String chestNameRaw;
     private String craftNameRaw;
 
-    public SoulChestService(PluginKeys keys, PluginConfig config, String chestNameRaw, String craftNameRaw) {
+    public SoulChestService(Plugin plugin, PluginKeys keys, PluginConfig config, String chestNameRaw, String craftNameRaw) {
+        this.plugin = plugin;
         this.keys = keys;
         this.config = config;
         this.chestNameRaw = chestNameRaw;
@@ -68,15 +79,13 @@ public final class SoulChestService {
         Location best = null;
         double bestDist = Double.MAX_VALUE;
         for (int[] pos : perimeter) {
-            Block ground = findSurface(world, pos[0], homeY, pos[1]);
-            if (ground == null) {
+            if (pos[0] == homeX && pos[1] == homeZ) {
                 continue;
             }
-            Block above = ground.getRelative(0, 1, 0);
-            if (!isReplaceable(above.getType())) {
+            if (!canHostStationOnBorder(world, pos[0], homeY, pos[1])) {
                 continue;
             }
-            Location candidate = above.getLocation();
+            Location candidate = new Location(world, pos[0], homeY + 1, pos[1]);
             double dx = candidate.getX() + 0.5D - homeBlockCenter.getX();
             double dz = candidate.getZ() + 0.5D - homeBlockCenter.getZ();
             double dist = dx * dx + dz * dz;
@@ -94,7 +103,6 @@ public final class SoulChestService {
             return null;
         }
         int cx = chestBlock.getBlockX();
-        int cy = chestBlock.getBlockY();
         int cz = chestBlock.getBlockZ();
         int hx = home.getBlockX();
         int hz = home.getBlockZ();
@@ -113,10 +121,13 @@ public final class SoulChestService {
             if (!onPerimeter(x, z, hx, hz, r)) {
                 continue;
             }
-            Location spot = craftSpotAt(world, x, cy, z, homeY);
-            if (spot == null) {
+            if (x == cx && z == cz) {
                 continue;
             }
+            if (!canHostStationOnBorder(world, x, homeY, z)) {
+                continue;
+            }
+            Location spot = new Location(world, x, homeY + 1, z);
             double dist = (x - cx) * (x - cx) + (z - cz) * (z - cz);
             if (dist < bestDist) {
                 bestDist = dist;
@@ -128,102 +139,119 @@ public final class SoulChestService {
         }
 
         for (int x = hx - r; x <= hx + r; x++) {
-            best = closerCraft(best, bestDist, craftSpotNearChest(world, x, homeY, hz - r, cx, cy, cz), cx, cz);
+            best = closerCraftBorder(best, bestDist, world, x, homeY, hz - r, cx, cz, hx, hz, r);
             if (best != null) {
-                bestDist = (best.getBlockX() - cx) * (best.getBlockX() - cx)
-                        + (best.getBlockZ() - cz) * (best.getBlockZ() - cz);
+                bestDist = horizontalDistSq(best, cx, cz);
             }
-            best = closerCraft(best, bestDist, craftSpotNearChest(world, x, homeY, hz + r, cx, cy, cz), cx, cz);
+            best = closerCraftBorder(best, bestDist, world, x, homeY, hz + r, cx, cz, hx, hz, r);
             if (best != null) {
-                bestDist = (best.getBlockX() - cx) * (best.getBlockX() - cx)
-                        + (best.getBlockZ() - cz) * (best.getBlockZ() - cz);
+                bestDist = horizontalDistSq(best, cx, cz);
             }
         }
         for (int z = hz - r + 1; z <= hz + r - 1; z++) {
-            best = closerCraft(best, bestDist, craftSpotNearChest(world, hx - r, homeY, z, cx, cy, cz), cx, cz);
+            best = closerCraftBorder(best, bestDist, world, hx - r, homeY, z, cx, cz, hx, hz, r);
             if (best != null) {
-                bestDist = (best.getBlockX() - cx) * (best.getBlockX() - cx)
-                        + (best.getBlockZ() - cz) * (best.getBlockZ() - cz);
+                bestDist = horizontalDistSq(best, cx, cz);
             }
-            best = closerCraft(best, bestDist, craftSpotNearChest(world, hx + r, homeY, z, cx, cy, cz), cx, cz);
+            best = closerCraftBorder(best, bestDist, world, hx + r, homeY, z, cx, cz, hx, hz, r);
             if (best != null) {
-                bestDist = (best.getBlockX() - cx) * (best.getBlockX() - cx)
-                        + (best.getBlockZ() - cz) * (best.getBlockZ() - cz);
+                bestDist = horizontalDistSq(best, cx, cz);
             }
         }
         return best;
     }
 
-    private static boolean onPerimeter(int x, int z, int hx, int hz, int r) {
-        boolean onEdgeX = Math.abs(x - hx) == r && z >= hz - r && z <= hz + r;
-        boolean onEdgeZ = Math.abs(z - hz) == r && x >= hx - r && x <= hx + r;
-        return onEdgeX || onEdgeZ;
-    }
-
-    private static Location closerCraft(Location current, double currentDist, Location candidate, int cx, int cz) {
-        if (candidate == null) {
+    private Location closerCraftBorder(
+            Location current,
+            double currentDist,
+            World world,
+            int x,
+            int homeY,
+            int z,
+            int cx,
+            int cz,
+            int hx,
+            int hz,
+            int r
+    ) {
+        if (Math.abs(x - cx) + Math.abs(z - cz) > 2) {
             return current;
         }
-        double dist = (candidate.getBlockX() - cx) * (candidate.getBlockX() - cx)
-                + (candidate.getBlockZ() - cz) * (candidate.getBlockZ() - cz);
+        if (x == cx && z == cz) {
+            return current;
+        }
+        if (!onPerimeter(x, z, hx, hz, r) || !canHostStationOnBorder(world, x, homeY, z)) {
+            return current;
+        }
+        Location candidate = new Location(world, x, homeY + 1, z);
+        double dist = horizontalDistSq(candidate, cx, cz);
         if (current == null || dist < currentDist) {
             return candidate;
         }
         return current;
     }
 
-    private Location craftSpotNearChest(World world, int x, int homeY, int z, int cx, int cy, int cz) {
-        if (Math.abs(x - cx) + Math.abs(z - cz) > 2) {
-            return null;
-        }
-        if (x == cx && z == cz) {
-            return null;
-        }
-        return craftSpotAt(world, x, cy, z, homeY);
+    private static double horizontalDistSq(Location loc, int cx, int cz) {
+        int dx = loc.getBlockX() - cx;
+        int dz = loc.getBlockZ() - cz;
+        return dx * dx + dz * dz;
     }
 
-    private Location craftSpotAt(World world, int x, int cy, int z, int homeY) {
-        Block atChestY = world.getBlockAt(x, cy, z);
-        if (isChestLike(atChestY.getType())) {
-            return null;
-        }
-        if ((isReplaceable(atChestY.getType()) || atChestY.getType() == Material.CRAFTING_TABLE)
-                && supportsCraft(atChestY)) {
-            return atChestY.getLocation();
-        }
-        Block ground = findSurface(world, x, homeY, z);
-        if (ground == null) {
-            return null;
-        }
-        Block above = ground.getRelative(0, 1, 0);
-        if (isChestLike(above.getType())) {
-            return null;
-        }
-        if (isReplaceable(above.getType()) || above.getType() == Material.CRAFTING_TABLE) {
-            return above.getLocation();
-        }
-        return null;
-    }
-
-    private static boolean supportsCraft(Block craftBlock) {
-        Block below = craftBlock.getRelative(0, -1, 0);
-        Material type = below.getType();
-        if (type == Material.FARMLAND || type == Material.WATER) {
+    private static boolean canHostStationOnBorder(World world, int x, int homeY, int z) {
+        Block floor = world.getBlockAt(x, homeY, z);
+        Material floorType = floor.getType();
+        if (floorType == Material.WATER || floorType == Material.LAVA || floorType == Material.BEDROCK) {
             return false;
         }
-        return type.isSolid();
+        Block station = world.getBlockAt(x, homeY + 1, z);
+        Material stationType = station.getType();
+        if (isChestLike(stationType) || stationType == Material.CRAFTING_TABLE) {
+            return false;
+        }
+        if (stationType == Material.BEDROCK || stationType == Material.OBSIDIAN) {
+            return false;
+        }
+        return true;
     }
 
-    private static Block findSurface(World world, int x, int homeY, int z) {
-        for (int y = homeY + 2; y >= homeY - 8; y--) {
-            Block block = world.getBlockAt(x, y, z);
-            if (block.getType().isSolid()
-                    && !isChestLike(block.getType())
-                    && block.getType() != Material.CRAFTING_TABLE) {
-                return block;
-            }
+    public void clearStationColumn(Location stationLoc) {
+        if (stationLoc == null || stationLoc.getWorld() == null) {
+            return;
         }
-        return null;
+        World world = stationLoc.getWorld();
+        int x = stationLoc.getBlockX();
+        int baseY = stationLoc.getBlockY();
+        int z = stationLoc.getBlockZ();
+        for (int y = baseY; y <= baseY + 6; y++) {
+            Block block = world.getBlockAt(x, y, z);
+            Material type = block.getType();
+            if (type.isAir()) {
+                continue;
+            }
+            if (isChestLike(type) || type == Material.CRAFTING_TABLE) {
+                continue;
+            }
+            if (!canClearForStation(type)) {
+                continue;
+            }
+            block.setType(Material.AIR, false);
+        }
+    }
+
+    private static boolean canClearForStation(Material type) {
+        if (type.isAir() || type == Material.WATER || type == Material.LAVA) {
+            return false;
+        }
+        if (type == Material.BEDROCK || type == Material.OBSIDIAN || type == Material.BARRIER) {
+            return false;
+        }
+        if (isChestLike(type) || type == Material.CRAFTING_TABLE) {
+            return false;
+        }
+        return type.isSolid()
+                || type == Material.SNOW
+                || FarmAreaService.isVegetation(type)
+                || isReplaceable(type);
     }
 
     private static boolean isReplaceable(Material type) {
@@ -235,25 +263,109 @@ public final class SoulChestService {
                 || type.name().endsWith("_CARPET");
     }
 
+    private static boolean onPerimeter(int x, int z, int hx, int hz, int r) {
+        boolean onEdgeX = Math.abs(x - hx) == r && z >= hz - r && z <= hz + r;
+        boolean onEdgeZ = Math.abs(z - hz) == r && x >= hx - r && x <= hx + r;
+        return onEdgeX || onEdgeZ;
+    }
+
     public static boolean isChestLike(Material type) {
         return type == Material.CHEST || Tag.COPPER_CHESTS.isTagged(type);
     }
 
     public void placeChest(Location location, UUID golemId, UUID ownerUuid) {
+        placeChest(location, golemId, ownerUuid, null);
+    }
+
+    public void placeChest(Location location, UUID golemId, UUID ownerUuid, Location faceToward) {
         Block block = location.getBlock();
         ensureStationSupport(block);
-        block.setType(Material.COPPER_CHEST, false);
+        BlockData blockData = Material.COPPER_CHEST.createBlockData();
+        if (blockData instanceof Directional directional) {
+            directional.setFacing(faceTowardHome(location, faceToward));
+            block.setBlockData(directional, false);
+        } else {
+            block.setType(Material.COPPER_CHEST, false);
+        }
         applyChestMeta(block, golemId, ownerUuid);
     }
 
     public void tagExistingChest(Location location, UUID golemId, UUID ownerUuid) {
+        tagExistingChest(location, golemId, ownerUuid, null);
+    }
+
+    public void tagExistingChest(Location location, UUID golemId, UUID ownerUuid, Location faceToward) {
         Block block = location.getBlock();
         if (!isChestLike(block.getType())) {
-            placeChest(location, golemId, ownerUuid);
+            placeChest(location, golemId, ownerUuid, faceToward);
             return;
         }
         ensureStationSupport(block);
+        if (faceToward != null && block.getBlockData() instanceof Directional directional) {
+            directional.setFacing(faceTowardHome(location, faceToward));
+            block.setBlockData(directional, false);
+        }
         applyChestMeta(block, golemId, ownerUuid);
+    }
+
+    private static org.bukkit.block.BlockFace faceTowardHome(Location chest, Location home) {
+        if (chest == null) {
+            return org.bukkit.block.BlockFace.NORTH;
+        }
+        double hx;
+        double hz;
+        if (home != null) {
+            hx = home.getX();
+            hz = home.getZ();
+        } else {
+            hx = chest.getX();
+            hz = chest.getZ() - 1.0D;
+        }
+        double dx = hx - (chest.getBlockX() + 0.5D);
+        double dz = hz - (chest.getBlockZ() + 0.5D);
+        if (Math.abs(dx) >= Math.abs(dz)) {
+            return dx >= 0 ? org.bukkit.block.BlockFace.EAST : org.bukkit.block.BlockFace.WEST;
+        }
+        return dz >= 0 ? org.bukkit.block.BlockFace.SOUTH : org.bukkit.block.BlockFace.NORTH;
+    }
+
+    public void openLid(SoulGolemData data) {
+        if (!(chestAt(data) instanceof Lidded lidded)) {
+            return;
+        }
+        if (!lidded.isOpen()) {
+            lidded.open();
+        }
+    }
+
+    public void closeLid(SoulGolemData data) {
+        this.lidCloseEpoch.merge(data.id(), 1, Integer::sum);
+        closeLidNow(data);
+    }
+
+    public void scheduleCloseLid(SoulGolemData data) {
+        Chest chest = chestAt(data);
+        if (chest == null) {
+            return;
+        }
+        UUID golemId = data.id();
+        int epoch = this.lidCloseEpoch.getOrDefault(golemId, 0);
+        Location loc = chest.getLocation();
+        PluginSchedulers.runAtLater(this.plugin, loc, () -> {
+            if (this.lidCloseEpoch.getOrDefault(golemId, 0) != epoch) {
+                return;
+            }
+            closeLidNow(data);
+        }, LID_CLOSE_DELAY_TICKS);
+    }
+
+    private void closeLidNow(SoulGolemData data) {
+        if (!(chestAt(data) instanceof Lidded lidded)) {
+            return;
+        }
+        if (lidded.isOpen()) {
+            lidded.close();
+        }
     }
 
     public void placeCraftingTable(Location location, UUID golemId, UUID ownerUuid) {
@@ -467,6 +579,40 @@ public final class SoulChestService {
         }
     }
 
+    public void removeStationsNear(Location center, UUID golemId, int radius) {
+        if (center == null || center.getWorld() == null || golemId == null) {
+            return;
+        }
+        World world = center.getWorld();
+        String id = golemId.toString();
+        int cx = center.getBlockX();
+        int cy = center.getBlockY();
+        int cz = center.getBlockZ();
+        int r = Math.max(1, radius);
+        for (int x = cx - r; x <= cx + r; x++) {
+            for (int z = cz - r; z <= cz + r; z++) {
+                for (int y = cy - 3; y <= cy + 5; y++) {
+                    Block block = world.getBlockAt(x, y, z);
+                    if (isChestLike(block.getType())) {
+                        UUID tagged = golemIdFromChest(block);
+                        if (golemId.equals(tagged)) {
+                            block.setType(Material.AIR, false);
+                        }
+                    } else if (block.getType() == Material.CRAFTING_TABLE) {
+                        UUID tagged = golemIdFromCraft(block);
+                        if (golemId.equals(tagged) || craftHologramMatches(block, golemId)) {
+                            block.setType(Material.AIR, false);
+                        }
+                    }
+                }
+            }
+        }
+        Location hologramCenter = center.clone().add(0.0D, 1.0D, 0.0D);
+        removeDisplaysAt(hologramCenter, this.keys.chestGolemId(), id, r + 4.0D);
+        removeDisplaysAt(hologramCenter, this.keys.craftGolemId(), id, r + 4.0D);
+        GolemDisplay.removeAllNear(world, center, r + 16.0D, id, this.keys);
+    }
+
     public boolean isChestPresent(SoulGolemData data) {
         World world = Bukkit.getWorld(data.worldName());
         if (world == null) {
@@ -672,6 +818,30 @@ public final class SoulChestService {
         return chest.getBlockInventory().firstEmpty() != -1;
     }
 
+    public Material findBestCombatWeapon(SoulGolemData data) {
+        Chest chest = chestAt(data);
+        if (chest == null) {
+            return null;
+        }
+        Material best = null;
+        int bestScore = -1;
+        for (ItemStack stack : chest.getBlockInventory().getContents()) {
+            if (stack == null || stack.getType().isAir()) {
+                continue;
+            }
+            Material type = stack.getType();
+            if (!GolemCombatWork.isWeapon(type)) {
+                continue;
+            }
+            int score = GolemCombatWork.weaponScore(type);
+            if (score > bestScore) {
+                bestScore = score;
+                best = type;
+            }
+        }
+        return best;
+    }
+
     public int countItem(SoulGolemData data, Material material) {
         Chest chest = chestAt(data);
         if (chest == null) {
@@ -680,8 +850,7 @@ public final class SoulChestService {
         int total = 0;
         for (ItemStack stack : chest.getBlockInventory().getContents()) {
             if (stack != null && stack.getType() == material) {
-                total += stack.getAmount();
-            }
+                total += stack.getAmount();            }
         }
         return total;
     }

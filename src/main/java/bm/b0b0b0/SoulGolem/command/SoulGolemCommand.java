@@ -1,11 +1,10 @@
 package bm.b0b0b0.SoulGolem.command;
 
 import bm.b0b0b0.SoulGolem.config.ConfigurationLoader;
+import bm.b0b0b0.SoulGolem.gui.GolemGuiService;
 import bm.b0b0b0.SoulGolem.item.StatueItemFactory;
 import bm.b0b0b0.SoulGolem.message.MessageService;
-import bm.b0b0b0.SoulGolem.model.ActiveGolem;
 import bm.b0b0b0.SoulGolem.model.GolemType;
-import bm.b0b0b0.SoulGolem.service.GolemRegistry;
 import bm.b0b0b0.SoulGolem.service.OreTableService;
 import bm.b0b0b0.SoulGolem.service.SoulChestService;
 import java.util.ArrayList;
@@ -23,22 +22,22 @@ public final class SoulGolemCommand implements CommandExecutor, TabCompleter {
 
     private final ConfigurationLoader configurationLoader;
     private final StatueItemFactory statueFactory;
-    private final GolemRegistry registry;
     private final OreTableService oreTable;
     private final SoulChestService chestService;
+    private final GolemGuiService guiService;
 
     public SoulGolemCommand(
             ConfigurationLoader configurationLoader,
             StatueItemFactory statueFactory,
-            GolemRegistry registry,
             OreTableService oreTable,
-            SoulChestService chestService
+            SoulChestService chestService,
+            GolemGuiService guiService
     ) {
         this.configurationLoader = configurationLoader;
         this.statueFactory = statueFactory;
-        this.registry = registry;
         this.oreTable = oreTable;
         this.chestService = chestService;
+        this.guiService = guiService;
     }
 
     private MessageService messages() {
@@ -55,7 +54,7 @@ public final class SoulGolemCommand implements CommandExecutor, TabCompleter {
         return switch (sub) {
             case "give" -> handleGive(sender, args);
             case "reload" -> handleReload(sender);
-            case "list" -> handleList(sender);
+            case "list", "gui" -> handleGui(sender);
             default -> {
                 messages().send(sender, "command-usage");
                 yield true;
@@ -180,47 +179,24 @@ public final class SoulGolemCommand implements CommandExecutor, TabCompleter {
         return true;
     }
 
-    private boolean handleList(CommandSender sender) {
+    private boolean handleGui(CommandSender sender) {
         if (!(sender instanceof Player player)) {
             messages().send(sender, "command-player-only");
             return true;
         }
-        List<ActiveGolem> owned = new ArrayList<>();
-        for (ActiveGolem golem : this.registry.all()) {
-            if (player.getUniqueId().equals(golem.data().ownerUuid())) {
-                owned.add(golem);
-            }
-        }
-        if (owned.isEmpty()) {
-            messages().send(player, "command-list-empty");
+        var permissions = this.configurationLoader.config().settings().permissions;
+        if (!player.hasPermission(permissions.use) && !player.hasPermission(permissions.admin)) {
+            messages().send(sender, "command-no-permission");
             return true;
         }
-        messages().send(player, "command-list-header", MessageService.stub("count", String.valueOf(owned.size())));
-        for (ActiveGolem golem : owned) {
-            String status;
-            if (golem.data().paused()) {
-                status = "paused";
-            } else if (golem.data().type() == GolemType.FARMER) {
-                status = golem.farmerState().name().toLowerCase(Locale.ROOT);
-            } else {
-                status = golem.state().name().toLowerCase(Locale.ROOT);
-            }
-            messages().send(player, "command-list-entry",
-                    MessageService.stub("type", golem.data().type().name()),
-                    MessageService.stub("level", String.valueOf(golem.data().level())),
-                    MessageService.stub("world", golem.data().worldName()),
-                    MessageService.stub("x", String.valueOf((int) golem.data().x())),
-                    MessageService.stub("y", String.valueOf((int) golem.data().y())),
-                    MessageService.stub("z", String.valueOf((int) golem.data().z())),
-                    MessageService.stub("status", status));
-        }
+        this.guiService.openList(player, 0);
         return true;
     }
 
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         if (args.length == 1) {
-            return filter(List.of("give", "reload", "list"), args[0]);
+            return filter(List.of("give", "reload", "list", "gui"), args[0]);
         }
         if (args.length == 2 && "give".equalsIgnoreCase(args[0])) {
             List<String> options = new ArrayList<>();
