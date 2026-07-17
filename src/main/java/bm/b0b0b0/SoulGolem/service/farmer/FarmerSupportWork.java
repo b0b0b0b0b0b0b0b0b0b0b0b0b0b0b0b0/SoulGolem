@@ -178,6 +178,9 @@ public final class FarmerSupportWork {
             case MOVING -> golem.farmerState(FarmerState.MOVING_TO_CLOSE_GATE);
             case CLOSING, DONE -> {
                 golem.wanderTarget(null);
+                if (tryResumePausedSeat(golem)) {
+                    return;
+                }
                 if (this.ctx.settings().farmer.rainShelter
                         && this.ctx.rainShelter().shouldSeekShelter(golem, copper, true)) {
                     golem.clearFetchFlags();
@@ -187,8 +190,28 @@ public final class FarmerSupportWork {
                     this.cycle.resumeAfterClear(golem);
                 }
             }
-            case IDLE -> golem.farmerState(FarmerState.WAITING_SEEDS);
+            case IDLE -> {
+                if (tryResumePausedSeat(golem)) {
+                    return;
+                }
+                golem.farmerState(FarmerState.WAITING_SEEDS);
+            }
         }
+    }
+
+    private boolean tryResumePausedSeat(ActiveGolem golem) {
+        if (!golem.resumeSeatRest()) {
+            return false;
+        }
+        if (!this.ctx.farmAreaService().hasValidSeat(golem.data())) {
+            golem.resumeSeatRest(false);
+            return false;
+        }
+        golem.clearFetchFlags();
+        golem.wanderTarget(null);
+        golem.targetCrop(null);
+        golem.farmerState(FarmerState.MOVING_TO_SEAT);
+        return true;
     }
 
     private void applyShelterPhase(ActiveGolem golem, CopperGolem copper, GolemRainShelterWork.Phase phase) {
@@ -198,17 +221,13 @@ public final class FarmerSupportWork {
             case SHELTERING -> golem.farmerState(FarmerState.SHELTERING);
             case DISABLED, UNAVAILABLE, DONE -> {
                 golem.wanderTarget(null);
-                if (this.ctx.rainShelter().isStorming(golem.data())) {
-                    golem.farmerState(FarmerState.SHELTERING);
-                } else {
-                    GolemAiMode.enable(
-                            this.ctx.plugin(),
-                            copper,
-                            this.ctx.registry(),
-                            this.ctx.keys()
-                    );
-                    this.cycle.resumeAfterClear(golem);
-                }
+                GolemAiMode.enable(
+                        this.ctx.plugin(),
+                        copper,
+                        this.ctx.registry(),
+                        this.ctx.keys()
+                );
+                this.cycle.resumeAfterClear(golem);
             }
         }
     }
@@ -220,6 +239,7 @@ public final class FarmerSupportWork {
 
         if (golem.farmerState() == FarmerState.SITTING
                 && this.ctx.farmAreaService().hasValidSeat(golem.data())) {
+            golem.resumeSeatRest(false);
             if (shouldLeaveSeat(golem)) {
                 golem.wanderTarget(null);
                 this.ctx.seatWork().leaveBench(
@@ -289,6 +309,9 @@ public final class FarmerSupportWork {
             return true;
         }
         if (canStartTorchJob(golem, radius, farmer)) {
+            return true;
+        }
+        if (farmer.collectGroundLoot && this.ctx.groundLoot().hasLoot(golem.data())) {
             return true;
         }
         return farmer.placeFence

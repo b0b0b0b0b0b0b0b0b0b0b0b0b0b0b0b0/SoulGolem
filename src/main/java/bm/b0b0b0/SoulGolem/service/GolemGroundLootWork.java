@@ -2,6 +2,8 @@ package bm.b0b0b0.SoulGolem.service;
 
 import bm.b0b0b0.SoulGolem.model.ActiveGolem;
 import bm.b0b0b0.SoulGolem.model.SoulGolemData;
+import java.util.ArrayList;
+import java.util.List;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.World;
@@ -20,6 +22,7 @@ public final class GolemGroundLootWork {
     }
 
     private static final double REACH_SQ = 2.25D;
+    private static final double SCOOP_SQ = 4.0D;
 
     private final SoulChestService chestService;
     private final GolemMovement movement;
@@ -46,13 +49,8 @@ public final class GolemGroundLootWork {
             return Phase.MOVING;
         }
         copper.setVelocity(new Vector(0, 0, 0));
-        ItemStack stack = loot.getItemStack();
-        if (stack != null && !stack.isEmpty()) {
-            golem.carry(stack);
-            golem.markDirty();
-        }
-        loot.remove();
-        return Phase.PICKED;
+        boolean picked = scoopNearby(golem, copper, radius);
+        return picked ? Phase.PICKED : Phase.NONE;
     }
 
     public boolean hasLoot(SoulGolemData data) {
@@ -83,41 +81,76 @@ public final class GolemGroundLootWork {
         return Math.abs(location.getY() - (homeY + 1.0D)) <= 3.5D;
     }
 
-    private Item findNearest(SoulGolemData data, int radius, Location from) {
-        Location home = homeCenter(data);
-        if (home == null || from == null || from.getWorld() == null) {
-            return null;
+    private boolean scoopNearby(ActiveGolem golem, CopperGolem copper, int radius) {
+        Location from = copper.getLocation();
+        List<Item> pile = new ArrayList<>();
+        for (Item item : listLoot(golem.data(), radius)) {
+            if (GolemMovement.horizontalDistanceSquared(from, item.getLocation()) <= SCOOP_SQ) {
+                pile.add(item);
+            }
         }
-        World world = home.getWorld();
-        if (world == null) {
-            return null;
+        if (pile.isEmpty()) {
+            return false;
         }
-        int maxR = Math.max(1, radius);
-        double box = maxR + 0.75D;
-        Item best = null;
-        double bestDist = Double.MAX_VALUE;
-        for (Entity entity : world.getNearbyEntities(home, box, 4.0D, box)) {
-            if (!(entity instanceof Item item)) {
+        boolean any = false;
+        for (Item item : pile) {
+            if (!item.isValid() || item.isDead()) {
                 continue;
             }
             ItemStack stack = item.getItemStack();
             if (stack == null || stack.isEmpty()) {
+                item.remove();
                 continue;
             }
-            if (item.getPickupDelay() > 40) {
-                continue;
-            }
-            Location at = item.getLocation();
-            if (!inTerritory(data, at, radius)) {
-                continue;
-            }
-            double dist = GolemMovement.horizontalDistanceSquared(from, at);
+            golem.carry(stack.clone());
+            item.remove();
+            any = true;
+        }
+        if (any) {
+            golem.markDirty();
+        }
+        return any;
+    }
+
+    private Item findNearest(SoulGolemData data, int radius, Location from) {
+        Item best = null;
+        double bestDist = Double.MAX_VALUE;
+        for (Item item : listLoot(data, radius)) {
+            double dist = GolemMovement.horizontalDistanceSquared(from, item.getLocation());
             if (dist < bestDist) {
                 bestDist = dist;
                 best = item;
             }
         }
         return best;
+    }
+
+    private List<Item> listLoot(SoulGolemData data, int radius) {
+        List<Item> list = new ArrayList<>();
+        Location home = homeCenter(data);
+        if (home == null) {
+            return list;
+        }
+        World world = home.getWorld();
+        if (world == null) {
+            return list;
+        }
+        int maxR = Math.max(1, radius);
+        double box = maxR + 0.75D;
+        for (Entity entity : world.getNearbyEntities(home, box, 4.0D, box)) {
+            if (!(entity instanceof Item item) || !item.isValid() || item.isDead()) {
+                continue;
+            }
+            ItemStack stack = item.getItemStack();
+            if (stack == null || stack.isEmpty()) {
+                continue;
+            }
+            if (!inTerritory(data, item.getLocation(), radius)) {
+                continue;
+            }
+            list.add(item);
+        }
+        return list;
     }
 
     private static Location homeCenter(SoulGolemData data) {

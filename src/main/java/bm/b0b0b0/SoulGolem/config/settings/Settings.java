@@ -491,7 +491,8 @@ public final class Settings extends YamlSerializable {
         public boolean rainShelter = true;
 
         @Comment({
-                @CommentValue("Supported crops: WHEAT, CARROT, POTATO")
+                @CommentValue("Supported crops: WHEAT, CARROT, POTATO, BEETROOT, PUMPKIN, MELON"),
+                @CommentValue("PUMPKIN/MELON plant on a checkerboard (stem / empty fruit pad) so fruit can grow")
         })
         public List<String> crops = defaultCrops();
     }
@@ -593,6 +594,9 @@ public final class Settings extends YamlSerializable {
         list.add("WHEAT");
         list.add("CARROT");
         list.add("POTATO");
+        list.add("BEETROOT");
+        list.add("PUMPKIN");
+        list.add("MELON");
         return list;
     }
 

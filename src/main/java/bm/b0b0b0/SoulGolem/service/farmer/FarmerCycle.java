@@ -72,6 +72,11 @@ public final class FarmerCycle {
         golem.targetCrop(null);
         GolemGaze.clear(golem);
         int radius = this.ctx.chestService().effectiveRadius(golem.data());
+        if (this.ctx.settings().farmer.collectGroundLoot && this.ctx.groundLoot().hasLoot(golem.data())) {
+            golem.farmerState(FarmerState.WAIT_GROWTH);
+            golem.data().lastActionAt(System.currentTimeMillis());
+            return;
+        }
         if (this.ctx.farmAreaService().hasValidSeat(golem.data())) {
             golem.farmerState(FarmerState.MOVING_TO_SEAT);
             golem.data().lastActionAt(System.currentTimeMillis());
@@ -80,14 +85,11 @@ public final class FarmerCycle {
         if (!this.ctx.farmAreaService().emptyFarmland(golem.data(), radius).isEmpty()) {
             if (this.ctx.farmAreaService().hasFieldCrops(golem.data(), radius, this.ctx.enabledCrops())) {
                 golem.farmerState(FarmerState.WAIT_GROWTH);
-            } else {
+            } else if (this.ctx.hasOpenPlantSpots(golem.data())) {
                 golem.farmerState(FarmerState.WAITING_SEEDS);
+            } else {
+                golem.farmerState(FarmerState.WAIT_GROWTH);
             }
-            golem.data().lastActionAt(System.currentTimeMillis());
-            return;
-        }
-        if (this.ctx.settings().farmer.collectGroundLoot && this.ctx.groundLoot().hasLoot(golem.data())) {
-            golem.farmerState(FarmerState.WAIT_GROWTH);
             golem.data().lastActionAt(System.currentTimeMillis());
             return;
         }
@@ -102,7 +104,15 @@ public final class FarmerCycle {
 
     public boolean tryStartPlant(ActiveGolem golem) {
         int radius = this.ctx.chestService().effectiveRadius(golem.data());
-        List<Block> empty = this.ctx.farmAreaService().emptyFarmland(golem.data(), radius);
+        CropType plantType = carriedCropType(golem);
+        if (plantType == null) {
+            Material seed = this.ctx.findSeedInChest(golem.data());
+            plantType = seed == null ? null : CropType.bySeed(seed);
+        }
+        if (plantType == null || !this.ctx.enabledCrops().contains(plantType)) {
+            return false;
+        }
+        List<Block> empty = this.ctx.farmAreaService().plantSpots(golem.data(), radius, plantType);
         if (empty.isEmpty()) {
             return false;
         }
@@ -123,6 +133,19 @@ public final class FarmerCycle {
         golem.targetCrop(plot);
         golem.farmerState(FarmerState.MOVING_TO_CHEST);
         return true;
+    }
+
+    private CropType carriedCropType(ActiveGolem golem) {
+        for (ItemStack stack : golem.carried()) {
+            if (stack == null || stack.isEmpty()) {
+                continue;
+            }
+            CropType type = CropType.bySeed(stack.getType());
+            if (type != null && this.ctx.enabledCrops().contains(type)) {
+                return type;
+            }
+        }
+        return null;
     }
 
     private boolean carriedHasSeed(ActiveGolem golem) {
@@ -213,9 +236,7 @@ public final class FarmerCycle {
             return true;
         }
 
-        List<Block> empty = this.ctx.farmAreaService().emptyFarmland(golem.data(), radius);
-        if (!empty.isEmpty()
-                && !this.ctx.farmAreaService().hasFieldCrops(golem.data(), radius, this.ctx.enabledCrops())) {
+        if (this.ctx.hasOpenPlantSpots(golem.data()) && !this.ctx.hasAnySeedInChest(golem.data())) {
             golem.clearFetchFlags();
             golem.wanderTarget(null);
             golem.targetCrop(null);
@@ -303,6 +324,15 @@ public final class FarmerCycle {
             if (assignNextJob(golem)) {
                 return;
             }
+        }
+        if (this.ctx.settings().farmer.collectGroundLoot && this.ctx.groundLoot().hasLoot(golem.data())) {
+            golem.clearFetchFlags();
+            golem.fetchingSeed(false);
+            golem.wanderTarget(null);
+            golem.targetCrop(null);
+            golem.farmerState(FarmerState.WAIT_GROWTH);
+            golem.data().lastActionAt(System.currentTimeMillis());
+            return;
         }
         if (this.ctx.farmAreaService().hasValidSeat(golem.data())) {
             golem.clearFetchFlags();

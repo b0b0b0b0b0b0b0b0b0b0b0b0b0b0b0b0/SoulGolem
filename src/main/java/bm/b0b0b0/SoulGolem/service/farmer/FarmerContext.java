@@ -168,6 +168,15 @@ public final class FarmerContext {
     }
 
     public Material findSeedInChest(SoulGolemData data) {
+        int radius = this.chestService.effectiveRadius(data);
+        for (CropType type : enabledCrops()) {
+            if (this.chestService.countItem(data, type.seed()) <= 0) {
+                continue;
+            }
+            if (!this.farmAreaService.plantSpots(data, radius, type).isEmpty()) {
+                return type.seed();
+            }
+        }
         for (CropType type : enabledCrops()) {
             if (this.chestService.countItem(data, type.seed()) > 0) {
                 return type.seed();
@@ -176,21 +185,38 @@ public final class FarmerContext {
         return null;
     }
 
+    public boolean hasOpenPlantSpots(SoulGolemData data) {
+        int radius = this.chestService.effectiveRadius(data);
+        for (CropType type : enabledCrops()) {
+            if (!this.farmAreaService.plantSpots(data, radius, type).isEmpty()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public boolean hasPlantWork(ActiveGolem golem) {
         int radius = this.chestService.effectiveRadius(golem.data());
-        if (this.farmAreaService.emptyFarmland(golem.data(), radius).isEmpty()) {
-            return false;
-        }
         for (ItemStack stack : golem.carried()) {
             if (stack == null || stack.isEmpty()) {
                 continue;
             }
             CropType type = CropType.bySeed(stack.getType());
-            if (type != null && enabledCrops().contains(type)) {
+            if (type != null
+                    && enabledCrops().contains(type)
+                    && !this.farmAreaService.plantSpots(golem.data(), radius, type).isEmpty()) {
                 return true;
             }
         }
-        return hasAnySeedInChest(golem.data());
+        for (CropType type : enabledCrops()) {
+            if (this.chestService.countItem(golem.data(), type.seed()) <= 0) {
+                continue;
+            }
+            if (!this.farmAreaService.plantSpots(golem.data(), radius, type).isEmpty()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public void drainFarmEnergy(ActiveGolem golem) {

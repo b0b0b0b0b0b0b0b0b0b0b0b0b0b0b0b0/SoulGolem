@@ -17,6 +17,9 @@ public final class ActiveGolem {
     private Material oreMaterial;
     private long mineTicksLeft;
     private long restTicksLeft;
+    private long fenceStuckTicks;
+    private double fenceCheckX = Double.NaN;
+    private double fenceCheckZ = Double.NaN;
     private boolean fieldReady;
     private boolean fetchingSeed;
     private boolean fetchingTorch;
@@ -42,6 +45,7 @@ public final class ActiveGolem {
     private long gateOpenSeenAt;
     private boolean dirty;
     private boolean pauseAfterRest;
+    private boolean resumeSeatRest;
     private boolean chestFullNotified;
     private boolean setupComplete;
     private SetupPhase setupPhase = SetupPhase.CLEAR;
@@ -112,6 +116,30 @@ public final class ActiveGolem {
 
     public void restTicksLeft(long restTicksLeft) {
         this.restTicksLeft = restTicksLeft;
+    }
+
+    public long fenceStuckTicks() {
+        return this.fenceStuckTicks;
+    }
+
+    public void fenceStuckTicks(long fenceStuckTicks) {
+        this.fenceStuckTicks = Math.max(0L, fenceStuckTicks);
+    }
+
+    public double fenceCheckX() {
+        return this.fenceCheckX;
+    }
+
+    public void fenceCheckX(double fenceCheckX) {
+        this.fenceCheckX = fenceCheckX;
+    }
+
+    public double fenceCheckZ() {
+        return this.fenceCheckZ;
+    }
+
+    public void fenceCheckZ(double fenceCheckZ) {
+        this.fenceCheckZ = fenceCheckZ;
     }
 
     public boolean fieldReady() {
@@ -358,6 +386,14 @@ public final class ActiveGolem {
 
     public void pauseAfterRest(boolean pauseAfterRest) {
         this.pauseAfterRest = pauseAfterRest;
+    }
+
+    public boolean resumeSeatRest() {
+        return this.resumeSeatRest;
+    }
+
+    public void resumeSeatRest(boolean resumeSeatRest) {
+        this.resumeSeatRest = resumeSeatRest;
     }
 
     public boolean chestFullNotified() {

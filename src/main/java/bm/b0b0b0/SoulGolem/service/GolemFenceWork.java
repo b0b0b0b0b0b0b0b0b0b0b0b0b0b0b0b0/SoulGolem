@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.function.Consumer;
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.Tag;
 import org.bukkit.block.Block;
 import org.bukkit.entity.CopperGolem;
 import org.bukkit.inventory.ItemStack;
@@ -75,6 +76,9 @@ public final class GolemFenceWork {
         if (!enabled) {
             returnUnused(golem);
             return Phase.DISABLED;
+        }
+        if (extractIfConfirmedStuck(golem, copper)) {
+            return Phase.MOVING_FENCE;
         }
         int radius = this.chestService.effectiveRadius(golem.data());
         Material fence = this.farmAreaService.resolveFenceMaterial(golem.data());
@@ -244,6 +248,10 @@ public final class GolemFenceWork {
         if (onEnergy != null) {
             onEnergy.accept(golem);
         }
+        Location inside = this.farmAreaService.standOnBorderForFence(golem.data(), spot);
+        if (inside != null && !blockedStand(inside)) {
+            this.movement.walkTowards(copper, inside, golem);
+        }
         golem.targetCrop(null);
         golem.markDirty();
         int radius = this.chestService.effectiveRadius(golem.data());
@@ -295,6 +303,10 @@ public final class GolemFenceWork {
         if (onEnergy != null) {
             onEnergy.accept(golem);
         }
+        Location inside = this.farmAreaService.standOnBorderForFence(golem.data(), spot);
+        if (inside != null && !blockedStand(inside)) {
+            this.movement.walkTowards(copper, inside, golem);
+        }
         golem.targetCrop(null);
         golem.markDirty();
         returnUnused(golem);
@@ -303,20 +315,103 @@ public final class GolemFenceWork {
     }
 
     private boolean approachStand(ActiveGolem golem, CopperGolem copper, Location stand) {
-        if (GolemMovement.horizontalDistanceSquared(copper.getLocation(), stand) <= 2.25D) {
+        if (stand == null || blockedStand(stand)) {
+            return false;
+        }
+        if (extractIfConfirmedStuck(golem, copper)) {
+            return false;
+        }
+        if (GolemMovement.horizontalDistanceSquared(copper.getLocation(), stand) <= 2.25D
+                && !feetInFence(copper)) {
             return true;
         }
-        Location before = copper.getLocation().clone();
         this.movement.walkTowards(copper, stand, golem);
-        if (GolemMovement.horizontalDistanceSquared(copper.getLocation(), stand) <= 2.25D) {
+        return GolemMovement.horizontalDistanceSquared(copper.getLocation(), stand) <= 2.25D
+                && !feetInFence(copper);
+    }
+
+    /**
+     * Teleport only when feet are inside a fence/gate column and the golem has not moved for ~2s.
+     */
+    private boolean extractIfConfirmedStuck(ActiveGolem golem, CopperGolem copper) {
+        Location at = copper.getLocation();
+        if (!feetInFence(copper)) {
+            golem.fenceStuckTicks(0L);
+            golem.fenceCheckX(at.getX());
+            golem.fenceCheckZ(at.getZ());
+            return false;
+        }
+        double lastX = golem.fenceCheckX();
+        double lastZ = golem.fenceCheckZ();
+        boolean hasLast = !Double.isNaN(lastX) && !Double.isNaN(lastZ);
+        double movedSq = hasLast
+                ? (at.getX() - lastX) * (at.getX() - lastX) + (at.getZ() - lastZ) * (at.getZ() - lastZ)
+                : 0.0D;
+        golem.fenceCheckX(at.getX());
+        golem.fenceCheckZ(at.getZ());
+        if (movedSq > 0.01D) {
+            golem.fenceStuckTicks(0L);
+            return false;
+        }
+        golem.fenceStuckTicks(golem.fenceStuckTicks() + 10L);
+        if (golem.fenceStuckTicks() < 40L) {
+            return false;
+        }
+        Block anchor = golem.targetCrop() != null ? golem.targetCrop().getBlock() : null;
+        Location safe = anchor != null
+                ? this.farmAreaService.standOnBorderForFence(golem.data(), anchor)
+                : null;
+        if (safe == null || blockedStand(safe)) {
+            safe = this.farmAreaService.safeStandNearHome(golem.data());
+        }
+        if (safe == null || blockedStand(safe)) {
+            safe = pushTowardHome(golem, copper);
+        }
+        golem.fenceStuckTicks(0L);
+        if (safe == null) {
             return true;
         }
-        if (GolemMovement.horizontalDistanceSquared(before, copper.getLocation()) < 0.04D) {
-            copper.teleport(stand);
-            copper.setVelocity(new Vector(0, 0, 0));
-            return GolemMovement.horizontalDistanceSquared(copper.getLocation(), stand) <= 2.25D;
+        this.movement.stop(copper);
+        GolemTeleport.park(copper, safe);
+        copper.setVelocity(new Vector(0, 0, 0));
+        return true;
+    }
+
+    private static Location pushTowardHome(ActiveGolem golem, CopperGolem copper) {
+        if (golem == null || copper == null || !copper.isValid()) {
+            return null;
         }
-        return false;
+        int homeX = (int) Math.floor(golem.data().homeX());
+        int homeY = (int) Math.floor(golem.data().homeY());
+        int homeZ = (int) Math.floor(golem.data().homeZ());
+        int bx = copper.getLocation().getBlockX();
+        int bz = copper.getLocation().getBlockZ();
+        int nx = bx + Integer.compare(homeX, bx);
+        int nz = bz + Integer.compare(homeZ, bz);
+        if (nx == bx && nz == bz) {
+            nx = bx + 1;
+        }
+        Location at = new Location(copper.getWorld(), nx + 0.5D, homeY + 1.0D, nz + 0.5D);
+        if (Tag.FENCES.isTagged(at.getBlock().getType()) || Tag.FENCE_GATES.isTagged(at.getBlock().getType())) {
+            at = new Location(copper.getWorld(), homeX + 0.5D, homeY + 1.0D, homeZ + 0.5D);
+        }
+        return at;
+    }
+
+    private static boolean feetInFence(CopperGolem copper) {
+        if (copper == null || !copper.isValid()) {
+            return false;
+        }
+        Material feet = copper.getLocation().getBlock().getType();
+        return Tag.FENCES.isTagged(feet) || Tag.FENCE_GATES.isTagged(feet);
+    }
+
+    private static boolean blockedStand(Location stand) {
+        if (stand == null || stand.getWorld() == null) {
+            return true;
+        }
+        Material feet = stand.getBlock().getType();
+        return Tag.FENCES.isTagged(feet) || Tag.FENCE_GATES.isTagged(feet);
     }
 
     private void returnMaterial(ActiveGolem golem, Material material) {

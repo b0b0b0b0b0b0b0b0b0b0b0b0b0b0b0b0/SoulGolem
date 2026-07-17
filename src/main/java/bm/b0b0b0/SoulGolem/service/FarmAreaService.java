@@ -436,6 +436,87 @@ public final class FarmAreaService {
         return list;
     }
 
+    public List<Block> plantSpots(SoulGolemData data, int radius, CropType cropType) {
+        List<Block> empty = emptyFarmland(data, radius);
+        if (empty.isEmpty() || cropType == null) {
+            return empty;
+        }
+        boolean stemsEnabled = false;
+        Collection<CropType> enabled = this.configurationLoader.config().settings().enabledCrops();
+        for (CropType type : enabled) {
+            if (type.isStemCrop()) {
+                stemsEnabled = true;
+                break;
+            }
+        }
+        List<Block> result = new ArrayList<>();
+        for (Block soil : empty) {
+            if (cropType.isStemCrop()) {
+                if (!isStemLattice(soil.getX(), soil.getZ()) || !hasFruitPad(soil)) {
+                    continue;
+                }
+                result.add(soil);
+                continue;
+            }
+            if (stemsEnabled && isStemLattice(soil.getX(), soil.getZ())) {
+                continue;
+            }
+            if (isFruitPadNextToStem(soil)) {
+                continue;
+            }
+            result.add(soil);
+        }
+        return result;
+    }
+
+    private static boolean isStemLattice(int x, int z) {
+        return ((x + z) & 1) == 0;
+    }
+
+    private boolean hasFruitPad(Block stemSoil) {
+        for (BlockFace face : new BlockFace[]{BlockFace.NORTH, BlockFace.SOUTH, BlockFace.EAST, BlockFace.WEST}) {
+            Block pad = stemSoil.getRelative(face);
+            if (!canHostStemFruit(pad)) {
+                continue;
+            }
+            Block above = pad.getRelative(BlockFace.UP);
+            if (above.getType().isAir() || isVegetation(above.getType())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isFruitPadNextToStem(Block soil) {
+        for (BlockFace face : new BlockFace[]{BlockFace.NORTH, BlockFace.SOUTH, BlockFace.EAST, BlockFace.WEST}) {
+            Block neighbor = soil.getRelative(face).getRelative(BlockFace.UP);
+            Material type = neighbor.getType();
+            if (type == Material.PUMPKIN_STEM
+                    || type == Material.MELON_STEM
+                    || type == Material.ATTACHED_PUMPKIN_STEM
+                    || type == Material.ATTACHED_MELON_STEM) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean canHostStemFruit(Block ground) {
+        if (ground == null) {
+            return false;
+        }
+        Material type = ground.getType();
+        return type == Material.FARMLAND
+                || type == Material.DIRT
+                || type == Material.GRASS_BLOCK
+                || type == Material.COARSE_DIRT
+                || type == Material.ROOTED_DIRT
+                || type == Material.PODZOL
+                || type == Material.MOSS_BLOCK
+                || type == Material.MUD
+                || type == Material.MYCELIUM;
+    }
+
     public List<Block> matureWheat(SoulGolemData data, int radius) {
         return matureCrops(data, radius, List.of(CropType.WHEAT));
     }
@@ -452,7 +533,14 @@ public final class FarmAreaService {
         for (int x = -radius + 1; x <= radius - 1; x++) {
             for (int z = -radius + 1; z <= radius - 1; z++) {
                 Block crop = world.getBlockAt(homeX + x, homeY + 1, homeZ + z);
-                if (!isEnabledCrop(crop.getType(), crops)) {
+                CropType type = CropType.byCrop(crop.getType());
+                if (type == null || !crops.contains(type)) {
+                    continue;
+                }
+                if (type.isStemCrop()) {
+                    if (type.isFruit(crop.getType())) {
+                        list.add(crop);
+                    }
                     continue;
                 }
                 BlockData dataBlock = crop.getBlockData();
@@ -529,7 +617,21 @@ public final class FarmAreaService {
         for (int x = -radius + 1; x <= radius - 1; x++) {
             for (int z = -radius + 1; z <= radius - 1; z++) {
                 Block crop = world.getBlockAt(homeX + x, homeY + 1, homeZ + z);
-                if (!isEnabledCrop(crop.getType(), crops)) {
+                CropType type = CropType.byCrop(crop.getType());
+                if (type == null || !crops.contains(type)) {
+                    continue;
+                }
+                if (type.isStemCrop()) {
+                    if (crop.getType() != type.crop()) {
+                        continue;
+                    }
+                    BlockData dataBlock = crop.getBlockData();
+                    if (!(dataBlock instanceof Ageable ageable)) {
+                        continue;
+                    }
+                    if (ageable.getAge() < ageable.getMaximumAge()) {
+                        list.add(crop);
+                    }
                     continue;
                 }
                 BlockData dataBlock = crop.getBlockData();
@@ -545,8 +647,23 @@ public final class FarmAreaService {
     }
 
     public boolean hasFieldCrops(SoulGolemData data, int radius, Collection<CropType> crops) {
-        return !immatureCrops(data, radius, crops).isEmpty()
-                || !matureCrops(data, radius, crops).isEmpty();
+        World world = Bukkit.getWorld(data.worldName());
+        if (world == null || crops == null || crops.isEmpty()) {
+            return false;
+        }
+        int homeX = (int) Math.floor(data.homeX());
+        int homeY = (int) Math.floor(data.homeY());
+        int homeZ = (int) Math.floor(data.homeZ());
+        for (int x = -radius + 1; x <= radius - 1; x++) {
+            for (int z = -radius + 1; z <= radius - 1; z++) {
+                Material type = world.getBlockAt(homeX + x, homeY + 1, homeZ + z).getType();
+                CropType crop = CropType.byCrop(type);
+                if (crop != null && crops.contains(crop)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     public int moodScore(SoulGolemData data, int radius) {
@@ -925,7 +1042,7 @@ public final class FarmAreaService {
     }
 
     public Location standOnBorderForFence(SoulGolemData data, Block outerCell) {
-        if (outerCell == null || outerCell.getWorld() == null) {
+        if (outerCell == null || outerCell.getWorld() == null || data == null) {
             return null;
         }
         int homeX = (int) Math.floor(data.homeX());
@@ -947,35 +1064,78 @@ public final class FarmAreaService {
         } else if (oz >= homeZ + fr) {
             inZ = homeZ + r;
         }
+        if (inX == ox && inZ == oz) {
+            int stepX = Integer.compare(homeX, ox);
+            int stepZ = Integer.compare(homeZ, oz);
+            inX = ox + stepX;
+            inZ = oz + stepZ;
+        }
         int[][] candidates = {
                 {inX, inZ},
+                {inX + Integer.compare(homeX, inX), inZ},
+                {inX, inZ + Integer.compare(homeZ, inZ)},
                 {inX + 1, inZ}, {inX - 1, inZ}, {inX, inZ + 1}, {inX, inZ - 1},
                 {inX + 1, inZ + 1}, {inX + 1, inZ - 1}, {inX - 1, inZ + 1}, {inX - 1, inZ - 1}
         };
         Location best = null;
-        double bestDist = Double.MAX_VALUE;
+        double bestScore = Double.MAX_VALUE;
         for (int[] c : candidates) {
+            if (c[0] == ox && c[1] == oz) {
+                continue;
+            }
             if (Math.abs(c[0] - homeX) > r || Math.abs(c[1] - homeZ) > r) {
                 continue;
             }
-            Block border = outerCell.getWorld().getBlockAt(c[0], homeY, c[1]);
-            Location stand = standOn(border);
-            if (this.chestService.collidesWithStation(data, stand)) {
+            Location stand = standFeetIfClear(outerCell.getWorld(), data, c[0], homeY, c[1]);
+            if (stand == null) {
                 continue;
             }
             double dx = stand.getX() - (ox + 0.5D);
             double dz = stand.getZ() - (oz + 0.5D);
-            double dist = dx * dx + dz * dz;
-            if (dist < bestDist) {
-                bestDist = dist;
+            double toFence = dx * dx + dz * dz;
+            if (toFence < 0.81D) {
+                continue;
+            }
+            double toHome = Math.abs(c[0] - homeX) + Math.abs(c[1] - homeZ);
+            double score = toFence + toHome * 0.01D;
+            if (score < bestScore) {
+                bestScore = score;
                 best = stand;
             }
         }
         if (best != null) {
             return best;
         }
-        Block border = outerCell.getWorld().getBlockAt(inX, homeY, inZ);
-        return standOn(border);
+        return standFeetIfClear(outerCell.getWorld(), data, inX, homeY, inZ);
+    }
+
+    private Location standFeetIfClear(World world, SoulGolemData data, int x, int homeY, int z) {
+        if (world == null || data == null) {
+            return null;
+        }
+        Block ground = world.getBlockAt(x, homeY, z);
+        if (!ground.getType().isSolid() && ground.getType() != Material.FARMLAND) {
+            return null;
+        }
+        if (SoulChestService.isChestLike(ground.getType()) || ground.getType() == Material.CRAFTING_TABLE) {
+            return null;
+        }
+        Block feet = ground.getRelative(BlockFace.UP);
+        Material feetType = feet.getType();
+        if (Tag.FENCES.isTagged(feetType) || Tag.FENCE_GATES.isTagged(feetType)) {
+            return null;
+        }
+        if (feetType.isSolid() && !isVegetation(feetType) && !isAnyCrop(feetType) && !feetType.isAir()) {
+            return null;
+        }
+        Location stand = feet.getLocation().add(0.5D, 0.0D, 0.5D);
+        if (this.chestService.collidesWithStation(data, stand)) {
+            return null;
+        }
+        if (!insideWoolBorder(data, stand)) {
+            return null;
+        }
+        return stand;
     }
 
     public void placeOuterFence(Block spot, Material fence, UUID golemId) {
@@ -1638,11 +1798,7 @@ public final class FarmAreaService {
     }
 
     public boolean isRainedOn(CopperGolem copper) {
-        if (copper == null || !copper.isValid()) {
-            return false;
-        }
-        Location eye = copper.getLocation().add(0.0D, 1.0D, 0.0D);
-        return isRainedOn(eye) || isRainedOn(copper.getLocation());
+        return copper != null && copper.isValid() && copper.isInRain();
     }
 
     public int[] chestOutward(SoulGolemData data) {
@@ -1659,10 +1815,10 @@ public final class FarmAreaService {
     }
 
     public Block rainShelterAnchor(SoulGolemData data) {
-        if (hasValidSeat(data)) {
-            return seatBlock(data);
+        if (!hasValidSeat(data)) {
+            return null;
         }
-        return findSeatSpot(data, this.chestService.effectiveRadius(data));
+        return seatBlock(data);
     }
 
     public Location rainShelterStand(SoulGolemData data) {
@@ -1670,12 +1826,19 @@ public final class FarmAreaService {
         if (anchor == null || anchor.getWorld() == null) {
             return null;
         }
-        double yOff = Tag.STAIRS.isTagged(anchor.getType()) ? 0.55D : 0.0D;
-        return anchor.getLocation().add(0.5D, yOff, 0.5D);
+        Location beside = standBesideInside(data, anchor);
+        if (beside != null) {
+            return beside;
+        }
+        return anchor.getLocation().add(0.5D, 0.0D, 0.5D);
     }
 
     public Location rainOpenSkyProbe(SoulGolemData data) {
-        World world = Bukkit.getWorld(data.worldName());
+        return rainOpenSkyProbe(data, null);
+    }
+
+    public Location rainOpenSkyProbe(SoulGolemData data, World preferred) {
+        World world = preferred != null ? preferred : Bukkit.getWorld(data.worldName());
         if (world == null) {
             return null;
         }
@@ -2105,6 +2268,9 @@ public final class FarmAreaService {
                 continue;
             }
             Block above = ground.getRelative(BlockFace.UP);
+            if (Tag.FENCES.isTagged(above.getType()) || Tag.FENCE_GATES.isTagged(above.getType())) {
+                continue;
+            }
             if (above.getType().isSolid() && !isAnyCrop(above.getType())) {
                 continue;
             }

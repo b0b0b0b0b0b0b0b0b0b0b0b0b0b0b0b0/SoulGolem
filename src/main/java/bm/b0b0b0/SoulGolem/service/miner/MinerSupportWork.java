@@ -45,6 +45,9 @@ public final class MinerSupportWork {
         switch (phase) {
             case MOVING -> golem.state(MinerState.MOVING_TO_CLOSE_GATE);
             case CLOSING, DONE, IDLE -> {
+                if (tryResumePausedSeatRest(golem)) {
+                    return;
+                }
                 if (phase != GolemGateWatch.Phase.IDLE
                         && this.ctx.settings().miner.rainShelter
                         && this.ctx.rainShelter().shouldSeekShelter(golem, copper, true)) {
@@ -58,23 +61,33 @@ public final class MinerSupportWork {
         }
     }
 
+    private boolean tryResumePausedSeatRest(ActiveGolem golem) {
+        if (!golem.resumeSeatRest()) {
+            return false;
+        }
+        if (golem.restTicksLeft() <= 0L || !this.ctx.farmAreaService().hasValidSeat(golem.data())) {
+            golem.resumeSeatRest(false);
+            return false;
+        }
+        golem.clearFetchFlags();
+        golem.targetCrop(null);
+        golem.state(MinerState.MOVING_TO_SEAT);
+        return true;
+    }
+
     private void applyShelterPhase(ActiveGolem golem, CopperGolem copper, GolemRainShelterWork.Phase phase) {
         switch (phase) {
             case MOVING -> golem.state(MinerState.MOVING_TO_SHELTER);
             case BUILDING -> golem.state(MinerState.BUILDING_SHELTER);
             case SHELTERING -> golem.state(MinerState.SHELTERING);
             case DISABLED, UNAVAILABLE, DONE -> {
-                if (this.ctx.rainShelter().isStorming(golem.data())) {
-                    golem.state(MinerState.SHELTERING);
-                } else {
-                    GolemAiMode.enable(
-                            this.ctx.plugin(),
-                            copper,
-                            this.ctx.registry(),
-                            this.ctx.keys()
-                    );
-                    golem.state(MinerState.IDLE);
-                }
+                GolemAiMode.enable(
+                        this.ctx.plugin(),
+                        copper,
+                        this.ctx.registry(),
+                        this.ctx.keys()
+                );
+                golem.state(MinerState.IDLE);
             }
         }
     }
@@ -199,6 +212,20 @@ public final class MinerSupportWork {
 
         if (golem.state() == MinerState.SITTING
                 && this.ctx.farmAreaService().hasValidSeat(golem.data())) {
+            golem.resumeSeatRest(false);
+            Settings.Miner miner = this.ctx.settings().miner;
+            if (miner.collectGroundLoot && this.ctx.groundLoot().hasLoot(golem.data())) {
+                golem.restTicksLeft(0L);
+                this.ctx.seatWork().leaveBench(
+                        golem,
+                        copper,
+                        this.ctx.plugin(),
+                        this.ctx.registry(),
+                        this.ctx.keys()
+                );
+                golem.state(MinerState.SEEKING);
+                return;
+            }
             this.ctx.seatWork().holdOnBench(golem, copper);
             if (golem.pauseAfterRest()) {
                 GolemControlService.finishPauseAfterRest(golem, this.ctx.repository());
@@ -257,6 +284,7 @@ public final class MinerSupportWork {
             golem.restTicksLeft(Math.max(1L, Math.round(this.ctx.settings().miner.seatRestTicks
                     * this.ctx.settings().moodRestMultiplierAt(mood))));
         }
+        golem.resumeSeatRest(false);
         golem.state(MinerState.SITTING);
         if (golem.pauseAfterRest()) {
             GolemControlService.finishPauseAfterRest(golem, this.ctx.repository());

@@ -142,6 +142,15 @@ public final class FarmerCarried {
 
     public static Collection<ItemStack> cropHarvestDrops(Block crop, CropType cropType) {
         List<ItemStack> drops = new ArrayList<>(2);
+        Material type = crop.getType();
+        if (cropType.isStemCrop() && cropType.isFruit(type)) {
+            if (cropType == CropType.MELON) {
+                drops.add(cropType.harvestProduct(3 + ThreadLocalRandom.current().nextInt(5)));
+            } else {
+                drops.add(cropType.harvestProduct(1));
+            }
+            return drops;
+        }
         if (!(crop.getBlockData() instanceof Ageable ageable)
                 || ageable.getAge() < ageable.getMaximumAge()) {
             drops.add(new ItemStack(cropType.seed(), 1));
@@ -157,6 +166,18 @@ public final class FarmerCarried {
                 }
             }
             drops.add(new ItemStack(Material.WHEAT_SEEDS, seeds));
+            return drops;
+        }
+        if (cropType == CropType.BEETROOT) {
+            drops.add(new ItemStack(Material.BEETROOT, 1));
+            int seeds = 1;
+            ThreadLocalRandom random = ThreadLocalRandom.current();
+            for (int i = 0; i < 3; i++) {
+                if (random.nextDouble() < 0.5714286D) {
+                    seeds++;
+                }
+            }
+            drops.add(new ItemStack(Material.BEETROOT_SEEDS, seeds));
             return drops;
         }
         int amount = 1 + ThreadLocalRandom.current().nextInt(3);

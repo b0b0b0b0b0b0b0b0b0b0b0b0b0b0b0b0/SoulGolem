@@ -235,6 +235,23 @@ public final class MinerTickService {
             boolean closingGate = state == MinerState.MOVING_TO_CLOSE_GATE
                     || state == MinerState.CLOSING_GATE;
             Settings.Miner miner = this.context.settings().miner;
+            boolean inShelter = state == MinerState.MOVING_TO_SHELTER
+                    || state == MinerState.BUILDING_SHELTER
+                    || state == MinerState.SHELTERING;
+            if (inShelter) {
+                if (!miner.rainShelter
+                        || !this.context.rainShelter().shouldContinueShelter(golem, copper)) {
+                    this.support.continueShelter(golem, copper);
+                    GolemDisplay.refresh(
+                            golem,
+                            copper,
+                            this.context.messages(),
+                            this.context.keys(),
+                            this.context.settings().visuals.textDisplays
+                    );
+                    return;
+                }
+            }
             if (miner.placeFence && miner.gateAutoClose) {
                 if (closingGate) {
                     this.support.continueCloseGate(golem, copper);
@@ -251,6 +268,9 @@ public final class MinerTickService {
                     if (state == MinerState.SITTING
                             || state == MinerState.MOVING_TO_SEAT
                             || state == MinerState.PLACING_SEAT) {
+                        if (golem.restTicksLeft() > 0L) {
+                            golem.resumeSeatRest(true);
+                        }
                         this.context.seatWork().leaveBench(
                                 golem,
                                 copper,

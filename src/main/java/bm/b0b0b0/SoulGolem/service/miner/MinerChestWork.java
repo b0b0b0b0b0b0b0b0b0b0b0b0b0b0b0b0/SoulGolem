@@ -158,6 +158,11 @@ public final class MinerChestWork {
         if (this.support.tryStartFenceJob(golem, radius, miner)) {
             return;
         }
+        if (miner.collectGroundLoot && this.ctx.groundLoot().hasLoot(golem.data())) {
+            golem.clearFetchFlags();
+            golem.state(MinerState.SEEKING);
+            return;
+        }
         if (this.support.tryGoToSeat(golem, radius, miner)) {
             return;
         }

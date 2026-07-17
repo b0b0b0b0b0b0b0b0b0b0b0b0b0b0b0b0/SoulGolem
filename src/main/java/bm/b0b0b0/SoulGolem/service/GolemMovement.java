@@ -230,10 +230,12 @@ public final class GolemMovement {
 
     private void snapFeet(Location next, SoulGolemData data) {
         int homeY = (int) Math.floor(data.homeY());
+        int homeX = (int) Math.floor(data.homeX());
+        int homeZ = (int) Math.floor(data.homeZ());
         Block feet = next.getBlock();
         Material feetType = feet.getType();
         if (Tag.FENCES.isTagged(feetType) || Tag.FENCE_GATES.isTagged(feetType)) {
-            next.setY(homeY + 1.0D);
+            pushOffFenceColumn(next, homeX, homeY, homeZ);
             return;
         }
         Block below = feet.getRelative(0, -1, 0);
@@ -244,11 +246,14 @@ public final class GolemMovement {
             } else {
                 next.setY(below.getY() + 1.0D);
             }
+            if (Tag.FENCES.isTagged(next.getBlock().getType()) || Tag.FENCE_GATES.isTagged(next.getBlock().getType())) {
+                pushOffFenceColumn(next, homeX, homeY, homeZ);
+            }
             return;
         }
         if (feetType.isSolid() || feetType == Material.FARMLAND) {
             if (Tag.FENCES.isTagged(feetType) || Tag.FENCE_GATES.isTagged(feetType)) {
-                next.setY(homeY + 1.0D);
+                pushOffFenceColumn(next, homeX, homeY, homeZ);
             } else {
                 next.setY(feet.getY() + 1.0D);
             }
@@ -256,6 +261,32 @@ public final class GolemMovement {
         }
         Block ground = next.getWorld().getBlockAt(next.getBlockX(), homeY, next.getBlockZ());
         if (ground.getType().isSolid() || ground.getType() == Material.FARMLAND) {
+            next.setY(homeY + 1.0D);
+        }
+        if (Tag.FENCES.isTagged(next.getBlock().getType()) || Tag.FENCE_GATES.isTagged(next.getBlock().getType())) {
+            pushOffFenceColumn(next, homeX, homeY, homeZ);
+        }
+    }
+
+    private static void pushOffFenceColumn(Location next, int homeX, int homeY, int homeZ) {
+        int bx = next.getBlockX();
+        int bz = next.getBlockZ();
+        int nx = bx + Integer.compare(homeX, bx);
+        int nz = bz + Integer.compare(homeZ, bz);
+        if (nx == bx && nz == bz) {
+            nx = bx + 1;
+        }
+        next.setX(nx + 0.5D);
+        next.setZ(nz + 0.5D);
+        next.setY(homeY + 1.0D);
+        if (Tag.FENCES.isTagged(next.getBlock().getType()) || Tag.FENCE_GATES.isTagged(next.getBlock().getType())) {
+            nx = bx + Integer.compare(homeX, bx) * 2;
+            nz = bz + Integer.compare(homeZ, bz) * 2;
+            if (nx == bx && nz == bz) {
+                nx = bx + 2;
+            }
+            next.setX(nx + 0.5D);
+            next.setZ(nz + 0.5D);
             next.setY(homeY + 1.0D);
         }
     }

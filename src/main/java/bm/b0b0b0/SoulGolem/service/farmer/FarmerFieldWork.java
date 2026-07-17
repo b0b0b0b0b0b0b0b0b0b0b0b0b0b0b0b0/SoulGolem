@@ -68,8 +68,10 @@ public final class FarmerFieldWork {
                     int r = this.ctx.chestService().effectiveRadius(golem.data());
                     if (this.ctx.farmAreaService().hasFieldCrops(golem.data(), r, this.ctx.enabledCrops())) {
                         golem.farmerState(FarmerState.WAIT_GROWTH);
-                    } else {
+                    } else if (this.ctx.hasOpenPlantSpots(golem.data())) {
                         golem.farmerState(FarmerState.WAITING_SEEDS);
+                    } else {
+                        golem.farmerState(FarmerState.WAIT_GROWTH);
                     }
                 }
                 golem.markDirty();
@@ -102,8 +104,10 @@ public final class FarmerFieldWork {
                 int r = this.ctx.chestService().effectiveRadius(golem.data());
                 if (this.ctx.farmAreaService().hasFieldCrops(golem.data(), r, this.ctx.enabledCrops())) {
                     golem.farmerState(FarmerState.WAIT_GROWTH);
-                } else {
+                } else if (this.ctx.hasOpenPlantSpots(golem.data())) {
                     golem.farmerState(FarmerState.WAITING_SEEDS);
+                } else {
+                    golem.farmerState(FarmerState.WAIT_GROWTH);
                 }
             }
             return;
@@ -177,7 +181,7 @@ public final class FarmerFieldWork {
         golem.markDirty();
         if (this.carried.hasCarriedSeed(golem)) {
             int radiusLeft = this.ctx.chestService().effectiveRadius(golem.data());
-            List<Block> emptyLeft = this.ctx.farmAreaService().emptyFarmland(golem.data(), radiusLeft);
+            List<Block> emptyLeft = this.ctx.farmAreaService().plantSpots(golem.data(), radiusLeft, plantType);
             if (!emptyLeft.isEmpty()) {
                 golem.targetCrop(this.ctx.farthestPlot(golem.data(), emptyLeft));
                 golem.farmerState(FarmerState.MOVING_TO_PLANT);
@@ -211,23 +215,6 @@ public final class FarmerFieldWork {
                 return;
             }
         }
-        if (FarmerCarried.carriedStairs(golem) != null && !this.ctx.farmAreaService().hasValidSeat(golem.data())) {
-            golem.wanderTarget(null);
-            golem.clearFetchFlags();
-            golem.farmerState(FarmerState.MOVING_TO_SEAT);
-            this.support.continueSeat(golem, copper);
-            return;
-        }
-        if (this.ctx.farmAreaService().hasValidSeat(golem.data())) {
-            golem.wanderTarget(null);
-            golem.farmerState(FarmerState.MOVING_TO_SEAT);
-            this.support.continueSeat(golem, copper);
-            return;
-        }
-        if (this.cycle.assignNextJob(golem)) {
-            golem.wanderTarget(null);
-            return;
-        }
         if (this.ctx.settings().farmer.collectGroundLoot) {
             GolemGroundLootWork.Phase loot = this.ctx.groundLoot().tick(golem, copper, true);
             if (loot == GolemGroundLootWork.Phase.MOVING) {
@@ -248,6 +235,23 @@ public final class FarmerFieldWork {
                     return;
                 }
             }
+        }
+        if (FarmerCarried.carriedStairs(golem) != null && !this.ctx.farmAreaService().hasValidSeat(golem.data())) {
+            golem.wanderTarget(null);
+            golem.clearFetchFlags();
+            golem.farmerState(FarmerState.MOVING_TO_SEAT);
+            this.support.continueSeat(golem, copper);
+            return;
+        }
+        if (this.ctx.farmAreaService().hasValidSeat(golem.data())) {
+            golem.wanderTarget(null);
+            golem.farmerState(FarmerState.MOVING_TO_SEAT);
+            this.support.continueSeat(golem, copper);
+            return;
+        }
+        if (this.cycle.assignNextJob(golem)) {
+            golem.wanderTarget(null);
+            return;
         }
         if (!golem.carried().isEmpty() && this.ctx.chestService().hasSpace(golem.data())) {
             golem.wanderTarget(null);
@@ -480,20 +484,26 @@ public final class FarmerFieldWork {
 
     public void takeSeedFromChest(ActiveGolem golem) {
         int radius = this.ctx.chestService().effectiveRadius(golem.data());
-        List<Block> empty = this.ctx.farmAreaService().emptyFarmland(golem.data(), radius);
-        if (empty.isEmpty()) {
-            golem.fetchingSeed(false);
-            this.cycle.afterPlant(golem);
-            return;
-        }
         Material seed = this.ctx.findSeedInChest(golem.data());
         if (seed == null) {
             golem.fetchingSeed(false);
             this.cycle.afterPlant(golem);
             return;
         }
+        CropType plantType = CropType.bySeed(seed);
+        if (plantType == null) {
+            golem.fetchingSeed(false);
+            this.cycle.afterPlant(golem);
+            return;
+        }
+        List<Block> spots = this.ctx.farmAreaService().plantSpots(golem.data(), radius, plantType);
+        if (spots.isEmpty()) {
+            golem.fetchingSeed(false);
+            this.cycle.afterPlant(golem);
+            return;
+        }
         int available = this.ctx.chestService().countItem(golem.data(), seed);
-        int want = Math.min(Math.max(1, this.ctx.settings().farmer.seedsPerTrip), empty.size());
+        int want = Math.min(Math.max(1, this.ctx.settings().farmer.seedsPerTrip), spots.size());
         want = Math.min(want, available);
         if (want <= 0 || !this.ctx.chestService().takeItem(golem.data(), seed, want)) {
             golem.fetchingSeed(false);
@@ -503,9 +513,7 @@ public final class FarmerFieldWork {
         golem.clearCarried();
         golem.carry(new ItemStack(seed, want));
         golem.fetchingSeed(false);
-        if (golem.targetCrop() == null) {
-            golem.targetCrop(this.ctx.farthestPlot(golem.data(), empty));
-        }
+        golem.targetCrop(this.ctx.farthestPlot(golem.data(), spots));
         golem.farmerState(FarmerState.MOVING_TO_PLANT);
         golem.markDirty();
     }

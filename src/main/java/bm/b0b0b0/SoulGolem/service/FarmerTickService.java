@@ -225,6 +225,17 @@ public final class FarmerTickService {
         boolean closingGate = state == FarmerState.MOVING_TO_CLOSE_GATE
                 || state == FarmerState.CLOSING_GATE;
         Settings.Farmer farmer = this.context.settings().farmer;
+        boolean inShelter = state == FarmerState.MOVING_TO_SHELTER
+                || state == FarmerState.BUILDING_SHELTER
+                || state == FarmerState.SHELTERING;
+        if (inShelter) {
+            if (!farmer.rainShelter
+                    || !this.context.rainShelter().shouldContinueShelter(golem, copper)) {
+                this.support.continueShelter(golem, copper);
+                GolemDisplay.refresh(golem, copper, this.context.messages(), this.context.keys(), style);
+                return;
+            }
+        }
         if (farmer.placeFence && farmer.gateAutoClose) {
             if (closingGate) {
                 this.support.continueCloseGate(golem, copper);
@@ -235,6 +246,7 @@ public final class FarmerTickService {
                 if (state == FarmerState.SITTING
                         || state == FarmerState.MOVING_TO_SEAT
                         || state == FarmerState.PLACING_SEAT) {
+                    golem.resumeSeatRest(true);
                     this.context.seatWork().leaveBench(
                             golem,
                             copper,
