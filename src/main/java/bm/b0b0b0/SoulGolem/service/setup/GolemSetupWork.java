@@ -1,11 +1,13 @@
 package bm.b0b0b0.SoulGolem.service.setup;
 
 import bm.b0b0b0.SoulGolem.model.ActiveGolem;
+import bm.b0b0b0.SoulGolem.model.DiggerState;
 import bm.b0b0b0.SoulGolem.model.FarmerState;
 import bm.b0b0b0.SoulGolem.model.GolemType;
 import bm.b0b0b0.SoulGolem.model.MinerState;
 import bm.b0b0b0.SoulGolem.model.SetupPhase;
 import bm.b0b0b0.SoulGolem.model.SoulGolemData;
+import bm.b0b0b0.SoulGolem.service.digger.DiggerDigWork;
 import bm.b0b0b0.SoulGolem.service.FarmAreaService;
 import bm.b0b0b0.SoulGolem.service.GolemGaze;
 import bm.b0b0b0.SoulGolem.service.GolemMovement;
@@ -53,6 +55,10 @@ public final class GolemSetupWork {
         if (golem.data().type() == GolemType.FARMER) {
             FarmerState state = golem.farmerState();
             return state == FarmerState.MOVING_TO_SETUP_CLEAR || state == FarmerState.SETUP_CLEAR;
+        }
+        if (golem.data().type() == GolemType.DIGGER) {
+            DiggerState state = golem.diggerState();
+            return state == DiggerState.MOVING_TO_SETUP_CLEAR || state == DiggerState.SETUP_CLEAR;
         }
         MinerState state = golem.state();
         return state == MinerState.MOVING_TO_SETUP_CLEAR || state == MinerState.SETUP_CLEAR;
@@ -113,6 +119,18 @@ public final class GolemSetupWork {
         setMovingState(golem, phase);
         double reach = phase == SetupPhase.BORDER ? 1.2D : 1.69D;
         if (GolemMovement.horizontalDistanceSquared(copper.getLocation(), stand) > reach) {
+            if (phase == SetupPhase.BORDER) {
+                int homeY = (int) Math.floor(golem.data().homeY());
+                int radius = this.chestService.effectiveRadius(golem.data());
+                clearAroundSelf(golem.data(), target.getWorld(), copper.getLocation(), homeY, radius);
+                if (System.currentTimeMillis() - golem.data().lastActionAt() > 3_500L) {
+                    clearAboveBorderSlot(target);
+                    golem.advanceSetupTarget();
+                    golem.clearPathWaypoint();
+                    golem.data().lastActionAt(System.currentTimeMillis());
+                    return;
+                }
+            }
             this.movement.walkTowards(copper, stand, golem);
             return;
         }
@@ -143,6 +161,9 @@ public final class GolemSetupWork {
         }
         int homeY = (int) Math.floor(data.homeY());
         int radius = this.chestService.effectiveRadius(data);
+        long now = System.currentTimeMillis();
+
+        clearAroundSelf(data, world, copper.getLocation(), homeY, radius);
 
         Location column = stickyClearColumn(golem, copper, world, homeY, radius);
         if (column == null) {
@@ -154,7 +175,7 @@ public final class GolemSetupWork {
         int z = column.getBlockZ();
         Location approach = approachForClearColumn(data, world, x, homeY, z);
         Block feet = approach.getBlock();
-        if (isSetupJunkBlock(feet, data)) {
+        if (isSetupJunkBlock(feet, data) || FarmAreaService.isFoliage(feet.getType())) {
             x = feet.getX();
             z = feet.getZ();
             column = new Location(world, x, homeY, z);
@@ -163,8 +184,28 @@ public final class GolemSetupWork {
         }
 
         Location reachPoint = new Location(world, x + 0.5D, homeY + 1.0D, z + 0.5D);
+        double dist2 = GolemMovement.horizontalDistanceSquared(copper.getLocation(), reachPoint);
         setMovingState(golem, SetupPhase.CLEAR);
-        if (GolemMovement.horizontalDistanceSquared(copper.getLocation(), reachPoint) > 2.25D) {
+
+        clearInFront(data, world, copper.getLocation(), x, homeY, z, radius);
+        clearSetupColumn(data, world, approach.getBlockX(), homeY, approach.getBlockZ(), radius);
+
+        if (dist2 > 2.25D) {
+            if (now - data.lastActionAt() > 3_500L) {
+                clearSetupColumn(data, world, x, homeY, z, radius);
+                clearAroundSelf(data, world, copper.getLocation(), homeY, radius);
+                golem.clearSetupQueue();
+                golem.clearPathWaypoint();
+                data.lastActionAt(now);
+                golem.markDirty();
+                Location next = nearestClearColumn(copper.getLocation(), data, world, homeY, radius);
+                if (next == null) {
+                    advancePhase(golem);
+                    return;
+                }
+                golem.setSetupQueue(List.of(next));
+                return;
+            }
             this.movement.walkTowards(copper, approach, golem);
             return;
         }
@@ -175,7 +216,7 @@ public final class GolemSetupWork {
         setActingState(golem, SetupPhase.CLEAR);
         GolemGaze.face(golem, reachPoint);
         clearInFront(data, world, copper.getLocation(), x, homeY, z, radius);
-        golem.data().lastActionAt(System.currentTimeMillis());
+        data.lastActionAt(now);
         golem.markDirty();
 
         if (columnHasSetupJunk(data, world, x, homeY, z, radius)) {
@@ -190,6 +231,19 @@ public final class GolemSetupWork {
             return;
         }
         golem.setSetupQueue(List.of(next));
+    }
+
+    private void clearAroundSelf(SoulGolemData data, World world, Location at, int homeY, int radius) {
+        if (at == null || world == null) {
+            return;
+        }
+        int cx = at.getBlockX();
+        int cz = at.getBlockZ();
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                clearSetupColumn(data, world, cx + dx, homeY, cz + dz, radius);
+            }
+        }
     }
 
     private Location stickyClearColumn(
@@ -213,6 +267,7 @@ public final class GolemSetupWork {
             return null;
         }
         golem.setSetupQueue(List.of(next));
+        golem.data().lastActionAt(System.currentTimeMillis());
         return next;
     }
 
@@ -269,10 +324,10 @@ public final class GolemSetupWork {
             if (SoulChestService.isChestLike(feet.getType()) || feet.getType() == Material.CRAFTING_TABLE || feet.getType() == Material.COMPOSTER) {
                 continue;
             }
-            if (feet.getType().isSolid()
-                    && !FarmAreaService.isVegetation(feet.getType())
-                    && feet.getType() != Material.SNOW
-                    && !(ax == x && az == z)) {
+            if (FarmAreaService.isFoliage(feet.getType()) || FarmAreaService.isVegetation(feet.getType()) || feet.getType() == Material.SNOW) {
+                return feet.getLocation().add(0.5D, 0.0D, 0.5D);
+            }
+            if (feet.getType().isSolid() && !(ax == x && az == z)) {
                 continue;
             }
             return feet.getLocation().add(0.5D, 0.0D, 0.5D);
@@ -332,9 +387,22 @@ public final class GolemSetupWork {
         }
         boolean perimeter = x == homeX - r || x == homeX + r || z == homeZ - r || z == homeZ + r;
         int maxY = homeY + (perimeter ? 2 : 6);
+        Block floor = world.getBlockAt(x, homeY, z);
+        if (FarmAreaService.isFoliage(floor.getType()) || FarmAreaService.isVegetation(floor.getType())) {
+            floor.setType(Material.AIR, false);
+        }
+        Block under = world.getBlockAt(x, homeY - 1, z);
+        if (FarmAreaService.isFoliage(under.getType())) {
+            under.setType(Material.AIR, false);
+        }
         for (int y = maxY; y >= homeY + 1; y--) {
             Block block = world.getBlockAt(x, y, z);
-            if (!isSetupJunkBlock(block, data)) {
+            if (!isSetupJunkBlock(block, data) && !FarmAreaService.isFoliage(block.getType())) {
+                continue;
+            }
+            if (SoulChestService.isChestLike(block.getType())
+                    || block.getType() == Material.CRAFTING_TABLE
+                    || block.getType() == Material.COMPOSTER) {
                 continue;
             }
             block.setType(Material.AIR, false);
@@ -357,8 +425,13 @@ public final class GolemSetupWork {
         int r = Math.max(1, radius);
         boolean perimeter = x == homeX - r || x == homeX + r || z == homeZ - r || z == homeZ + r;
         int maxY = homeY + (perimeter ? 2 : 6);
+        Block floor = world.getBlockAt(x, homeY, z);
+        if (FarmAreaService.isFoliage(floor.getType()) || FarmAreaService.isVegetation(floor.getType())) {
+            return true;
+        }
         for (int y = homeY + 1; y <= maxY; y++) {
-            if (isSetupJunkBlock(world.getBlockAt(x, y, z), data)) {
+            Block block = world.getBlockAt(x, y, z);
+            if (isSetupJunkBlock(block, data) || FarmAreaService.isFoliage(block.getType())) {
                 return true;
             }
         }
@@ -389,6 +462,7 @@ public final class GolemSetupWork {
         golem.setupPhase(phase);
         golem.clearSetupQueue();
         golem.clearPathWaypoint();
+        golem.data().lastActionAt(System.currentTimeMillis());
         if (phase == SetupPhase.CLEAR) {
             setMovingState(golem, phase);
             return;
@@ -446,6 +520,9 @@ public final class GolemSetupWork {
             this.farmAreaService.ensureWater(data);
             golem.fieldReady(false);
             golem.farmerState(FarmerState.WAITING_SEEDS);
+        } else if (data.type() == GolemType.DIGGER) {
+            DiggerDigWork.ensureDigProgress(data);
+            golem.diggerState(DiggerState.IDLE);
         }
         golem.data().lastActionAt(System.currentTimeMillis());
         golem.markDirty();
@@ -567,7 +644,7 @@ public final class GolemSetupWork {
             if (SoulChestService.isChestLike(type) || type == Material.CRAFTING_TABLE || type == Material.COMPOSTER) {
                 continue;
             }
-            if (type.isSolid() || type == Material.SNOW || FarmAreaService.isVegetation(type)) {
+            if (FarmAreaService.isYardJunk(type) || type == Material.SNOW || FarmAreaService.isVegetation(type)) {
                 block.setType(Material.AIR, false);
             }
         }
@@ -645,6 +722,15 @@ public final class GolemSetupWork {
             });
             return;
         }
+        if (golem.data().type() == GolemType.DIGGER) {
+            golem.diggerState(switch (phase) {
+                case CLEAR -> DiggerState.MOVING_TO_SETUP_CLEAR;
+                case BORDER -> DiggerState.MOVING_TO_SETUP_BORDER;
+                case CHEST -> DiggerState.MOVING_TO_SETUP_CHEST;
+                case CRAFT, DONE -> DiggerState.IDLE;
+            });
+            return;
+        }
         golem.state(switch (phase) {
             case CLEAR -> MinerState.MOVING_TO_SETUP_CLEAR;
             case BORDER -> MinerState.MOVING_TO_SETUP_BORDER;
@@ -664,6 +750,15 @@ public final class GolemSetupWork {
                 case DONE -> true;
             };
         }
+        if (golem.data().type() == GolemType.DIGGER) {
+            DiggerState state = golem.diggerState();
+            return switch (phase) {
+                case CLEAR -> state == DiggerState.MOVING_TO_SETUP_CLEAR || state == DiggerState.SETUP_CLEAR;
+                case BORDER -> state == DiggerState.MOVING_TO_SETUP_BORDER || state == DiggerState.SETUP_BORDER;
+                case CHEST -> state == DiggerState.MOVING_TO_SETUP_CHEST || state == DiggerState.SETUP_CHEST;
+                case CRAFT, DONE -> true;
+            };
+        }
         MinerState state = golem.state();
         return switch (phase) {
             case CLEAR -> state == MinerState.MOVING_TO_SETUP_CLEAR || state == MinerState.SETUP_CLEAR;
@@ -681,6 +776,15 @@ public final class GolemSetupWork {
                 case CHEST -> FarmerState.SETUP_CHEST;
                 case CRAFT -> FarmerState.SETUP_CRAFT;
                 case DONE -> FarmerState.WAITING_SEEDS;
+            });
+            return;
+        }
+        if (golem.data().type() == GolemType.DIGGER) {
+            golem.diggerState(switch (phase) {
+                case CLEAR -> DiggerState.SETUP_CLEAR;
+                case BORDER -> DiggerState.SETUP_BORDER;
+                case CHEST -> DiggerState.SETUP_CHEST;
+                case CRAFT, DONE -> DiggerState.IDLE;
             });
             return;
         }

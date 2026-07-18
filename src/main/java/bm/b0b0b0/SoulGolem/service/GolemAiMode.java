@@ -22,6 +22,12 @@ public final class GolemAiMode {
                 default -> false;
             };
         }
+        if (golem.data().type() == bm.b0b0b0.SoulGolem.model.GolemType.DIGGER) {
+            return switch (golem.diggerState()) {
+                case WAITING_CHEST, RESTING, SITTING, SHELTERING, DONE -> true;
+                default -> false;
+            };
+        }
         return switch (golem.state()) {
             case WAITING_CHEST, RESTING, SITTING, SHELTERING -> true;
             default -> false;

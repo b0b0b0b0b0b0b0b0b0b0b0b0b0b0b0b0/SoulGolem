@@ -1,6 +1,6 @@
 package bm.b0b0b0.SoulGolem.service.farmer;
 
-import bm.b0b0b0.SoulGolem.config.settings.Settings;
+import bm.b0b0b0.SoulGolem.config.settings.GolemSettings;
 import bm.b0b0b0.SoulGolem.model.ActiveGolem;
 import bm.b0b0b0.SoulGolem.model.CropType;
 import bm.b0b0b0.SoulGolem.model.FarmerState;
@@ -94,7 +94,7 @@ public final class FarmerCycle {
         golem.targetCrop(null);
         GolemGaze.clear(golem);
         int radius = this.ctx.chestService().effectiveRadius(golem.data());
-        if (this.ctx.settings().farmer.collectGroundLoot && this.ctx.groundLoot().hasLoot(golem.data())) {
+        if (this.ctx.settings().yard.collectGroundLoot && this.ctx.groundLoot().hasLoot(golem.data())) {
             golem.farmerState(FarmerState.WAIT_GROWTH);
             golem.data().lastActionAt(System.currentTimeMillis());
             return;
@@ -199,7 +199,7 @@ public final class FarmerCycle {
     public boolean tryPrioritizeFence(ActiveGolem golem) {
         GolemFenceWork.Phase phase = this.ctx.fenceWork().tryStart(
                 golem,
-                this.ctx.settings().farmer.placeFence
+                this.ctx.settings().yard.placeFence
         );
         return switch (phase) {
             case MOVING_FENCE, MOVING_CLEAR, CLEARING, PLACING_FENCE, MOVING_GATE, PLACING_GATE -> {
@@ -222,7 +222,8 @@ public final class FarmerCycle {
 
     public boolean assignNextJob(ActiveGolem golem) {
         int radius = this.ctx.chestService().effectiveRadius(golem.data());
-        Settings.Farmer farmer = this.ctx.settings().farmer;
+        GolemSettings.Farmer farmer = this.ctx.settings().farmer;
+        GolemSettings.Yard yard = this.ctx.settings().yard;
 
         List<Block> mature = this.ctx.farmAreaService().matureCrops(golem.data(), radius, this.ctx.enabledCrops());
         if (!mature.isEmpty()) {
@@ -262,7 +263,7 @@ public final class FarmerCycle {
             return true;
         }
 
-        if (tryStartTorchJob(golem, radius, farmer)) {
+        if (tryStartTorchJob(golem, radius)) {
             return true;
         }
 
@@ -301,7 +302,7 @@ public final class FarmerCycle {
             return true;
         }
 
-        if (farmer.clearBorder && !this.ctx.farmAreaService().weedsToClear(golem.data(), radius).isEmpty()) {
+        if (yard.clearBorder && !this.ctx.farmAreaService().weedsToClear(golem.data(), radius).isEmpty()) {
             golem.clearFetchFlags();
             golem.wanderTarget(null);
             List<Block> junk = this.ctx.farmAreaService().weedsToClear(golem.data(), radius);
@@ -310,7 +311,7 @@ public final class FarmerCycle {
             return true;
         }
 
-        if (farmer.placeSeat
+        if (yard.placeSeat
                 && !this.ctx.farmAreaService().hasValidSeat(golem.data())
                 && this.ctx.farmAreaService().findSeatSpot(golem.data(), radius) != null) {
             Material stairs = FarmerCarried.carriedStairs(golem);
@@ -355,12 +356,12 @@ public final class FarmerCycle {
 
     public boolean tryStartTorchJob(ActiveGolem golem) {
         int radius = this.ctx.chestService().effectiveRadius(golem.data());
-        return tryStartTorchJob(golem, radius, this.ctx.settings().farmer);
+        return tryStartTorchJob(golem, radius);
     }
 
-    private boolean tryStartTorchJob(ActiveGolem golem, int radius, Settings.Farmer farmer) {
+    private boolean tryStartTorchJob(ActiveGolem golem, int radius) {
         Material torch = this.ctx.resolveTorch();
-        if (!farmer.placeTorches
+        if (!this.ctx.settings().yard.placeTorches
                 || this.ctx.chestService().countItem(golem.data(), torch) <= 0
                 || this.ctx.farmAreaService().perimeterTorchSpots(golem.data(), radius).isEmpty()) {
             return false;
@@ -384,7 +385,7 @@ public final class FarmerCycle {
                 return;
             }
         }
-        if (this.ctx.settings().farmer.collectGroundLoot && this.ctx.groundLoot().hasLoot(golem.data())) {
+        if (this.ctx.settings().yard.collectGroundLoot && this.ctx.groundLoot().hasLoot(golem.data())) {
             golem.clearFetchFlags();
             golem.fetchingSeed(false);
             golem.wanderTarget(null);

@@ -1,7 +1,7 @@
 package bm.b0b0b0.SoulGolem.service;
 
 import bm.b0b0b0.SoulGolem.config.PluginConfig;
-import bm.b0b0b0.SoulGolem.config.settings.Settings;
+import bm.b0b0b0.SoulGolem.config.settings.GolemSettings;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
@@ -23,7 +23,7 @@ public final class OreTableService {
 
     public void reload() {
         Set<Material> materials = EnumSet.noneOf(Material.class);
-        for (String name : this.config.settings().transformableBlocks) {
+        for (String name : this.config.golems().transformableBlocks) {
             Material material = Material.matchMaterial(name);
             if (material != null && material.isBlock()) {
                 materials.add(material);
@@ -33,7 +33,7 @@ public final class OreTableService {
 
         List<WeightedOre> weighted = new ArrayList<>();
         int sum = 0;
-        for (Settings.OreWeight entry : this.config.settings().oreTable) {
+        for (GolemSettings.OreWeight entry : this.config.golems().oreTable) {
             Material material = Material.matchMaterial(entry.material);
             if (material == null || !material.isBlock() || entry.weight <= 0) {
                 continue;

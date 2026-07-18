@@ -1,6 +1,6 @@
 package bm.b0b0b0.SoulGolem.service;
 
-import bm.b0b0b0.SoulGolem.config.settings.Settings;
+import bm.b0b0b0.SoulGolem.config.settings.GolemSettings;
 import java.util.Locale;
 import org.bukkit.entity.Display;
 import org.bukkit.entity.TextDisplay;
@@ -13,7 +13,7 @@ public final class TextDisplayStyle {
     private TextDisplayStyle() {
     }
 
-    public static void applyCommon(TextDisplay display, Settings.TextDisplays settings) {
+    public static void applyCommon(TextDisplay display, GolemSettings.TextDisplays settings) {
         display.setBillboard(parseBillboard(settings.billboard));
         display.setAlignment(parseAlignment(settings.alignment));
         display.setSeeThrough(settings.seeThrough);
@@ -34,11 +34,11 @@ public final class TextDisplayStyle {
         }
     }
 
-    public static void applyGolemNameplate(TextDisplay display, Settings.TextDisplays settings) {
+    public static void applyGolemNameplate(TextDisplay display, GolemSettings.TextDisplays settings) {
         applyGolemNameplate(display, settings, Math.max(0.0F, settings.golemOffsetY));
     }
 
-    public static void applyGolemNameplate(TextDisplay display, Settings.TextDisplays settings, float rideOffsetY) {
+    public static void applyGolemNameplate(TextDisplay display, GolemSettings.TextDisplays settings, float rideOffsetY) {
         applyCommon(display, settings);
         float scale = Math.max(0.05F, settings.golemScale);
         display.setTransformation(new Transformation(
@@ -49,7 +49,7 @@ public final class TextDisplayStyle {
         ));
     }
 
-    public static void applyChestHologram(TextDisplay display, Settings.TextDisplays settings) {
+    public static void applyChestHologram(TextDisplay display, GolemSettings.TextDisplays settings) {
         applyCommon(display, settings);
         float scale = Math.max(0.05F, settings.chestScale);
         display.setTransformation(new Transformation(

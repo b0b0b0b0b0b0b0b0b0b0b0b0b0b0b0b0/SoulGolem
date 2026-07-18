@@ -6,6 +6,7 @@ import bm.b0b0b0.SoulGolem.model.FarmerState;
 import bm.b0b0b0.SoulGolem.service.GolemGroundLootWork;
 import bm.b0b0b0.SoulGolem.service.GolemGaze;
 import bm.b0b0b0.SoulGolem.service.GolemMovement;
+import bm.b0b0b0.SoulGolem.service.SoulChestLink;
 import java.util.Collection;
 import java.util.List;
 import org.bukkit.Location;
@@ -215,7 +216,7 @@ public final class FarmerFieldWork {
                 return;
             }
         }
-        if (this.ctx.settings().farmer.collectGroundLoot) {
+        if (this.ctx.settings().yard.collectGroundLoot) {
             GolemGroundLootWork.Phase loot = this.ctx.groundLoot().tick(golem, copper, true);
             if (loot == GolemGroundLootWork.Phase.MOVING) {
                 golem.farmerState(FarmerState.WANDERING);
@@ -461,8 +462,13 @@ public final class FarmerFieldWork {
             return;
         }
         this.ctx.requestBoneMealFromChest(golem);
-        if (GolemMovement.horizontalDistanceSquared(copper.getLocation(), chestStand) <= 1.69D) {
-            this.ctx.chestService().lid().run(golem.data(), () -> takeBoneMealFromChest(golem));
+        if (this.ctx.chestLink().canAccess(copper, golem.data())) {
+            if (this.ctx.chestLink().isLinked(golem.data())) {
+                takeBoneMealFromChest(golem);
+                this.ctx.chestLink().play(copper, golem.data(), SoulChestLink.Kind.WITHDRAW);
+            } else {
+                this.ctx.chestService().lid().run(golem.data(), () -> takeBoneMealFromChest(golem));
+            }
             return;
         }
         this.ctx.chestService().lid().closeNow(golem.data());

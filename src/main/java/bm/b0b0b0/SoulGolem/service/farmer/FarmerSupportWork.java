@@ -1,24 +1,20 @@
 package bm.b0b0b0.SoulGolem.service.farmer;
 
+import bm.b0b0b0.SoulGolem.config.settings.GolemSettings;
 import bm.b0b0b0.SoulGolem.model.ActiveGolem;
 import bm.b0b0b0.SoulGolem.model.FarmerState;
-import bm.b0b0b0.SoulGolem.config.settings.Settings;
 import bm.b0b0b0.SoulGolem.service.FarmAreaService;
-import bm.b0b0b0.SoulGolem.service.GolemAiMode;
+import bm.b0b0b0.SoulGolem.service.GolemCarried;
 import bm.b0b0b0.SoulGolem.service.GolemControlService;
-import bm.b0b0b0.SoulGolem.service.GolemFenceWork;
-import bm.b0b0b0.SoulGolem.service.GolemGateWatch;
 import bm.b0b0b0.SoulGolem.service.GolemGaze;
-import bm.b0b0b0.SoulGolem.service.GolemGroundLootWork;
 import bm.b0b0b0.SoulGolem.service.GolemMovement;
-import bm.b0b0b0.SoulGolem.service.GolemRainShelterWork;
 import bm.b0b0b0.SoulGolem.service.GolemSeatWork;
-import bm.b0b0b0.SoulGolem.service.GolemTorchWork;
-import bm.b0b0b0.SoulGolem.service.SoulChestService;
+import bm.b0b0b0.SoulGolem.service.GolemSupportWork;
 import java.util.Collection;
 import java.util.List;
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.Tag;
 import org.bukkit.block.Block;
 import org.bukkit.entity.CopperGolem;
 import org.bukkit.inventory.ItemStack;
@@ -27,20 +23,23 @@ import org.bukkit.util.Vector;
 public final class FarmerSupportWork {
 
     private final FarmerContext ctx;
-    private final FarmerCarried carried;
+    private final FarmerSupportBridge bridge;
+    private final GolemSupportWork shared;
     private FarmerCycle cycle;
     private FarmerCompostWork compost;
     private FarmerChestWork chest;
 
-    public FarmerSupportWork(FarmerContext ctx, FarmerCarried carried) {
+    public FarmerSupportWork(FarmerContext ctx) {
         this.ctx = ctx;
-        this.carried = carried;
+        this.bridge = new FarmerSupportBridge(ctx);
+        this.shared = new GolemSupportWork(ctx, this.bridge);
     }
 
     public void wire(FarmerCycle cycle, FarmerCompostWork compost, FarmerChestWork chest) {
         this.cycle = cycle;
         this.compost = compost;
         this.chest = chest;
+        this.bridge.wire(cycle);
     }
 
     public void continueClear(ActiveGolem golem, CopperGolem copper) {
@@ -58,14 +57,14 @@ public final class FarmerSupportWork {
         int radius = this.ctx.chestService().effectiveRadius(golem.data());
         Location target = golem.targetCrop();
         Block junk = target == null ? null : target.getBlock();
-        if (junk == null || junk.getType().isAir() || !isClearableJunk(junk) || isBorderBlock(junk)) {
+        if (junk == null || junk.getType().isAir() || !GolemSupportWork.isClearableJunk(junk) || isBorderBlock(junk)) {
             List<Block> list = this.ctx.farmAreaService().weedsToClear(golem.data(), radius);
             list.removeIf(this::isBorderBlock);
             if (list.isEmpty()) {
                 this.cycle.resumeAfterClear(golem);
                 return;
             }
-            junk = pickNearestJunk(copper.getLocation(), list);
+            junk = GolemSupportWork.pickNearest(copper.getLocation(), list);
             golem.targetCrop(junk.getLocation());
         }
         Location stand = this.ctx.farmAreaService().standForClear(junk);
@@ -97,7 +96,7 @@ public final class FarmerSupportWork {
         List<Block> left = this.ctx.farmAreaService().weedsToClear(golem.data(), radius);
         left.removeIf(this::isBorderBlock);
         if (!left.isEmpty() && (golem.carried().isEmpty() || this.ctx.chestService().hasSpace(golem.data()))) {
-            Block next = pickNearestJunk(copper.getLocation(), left);
+            Block next = GolemSupportWork.pickNearest(copper.getLocation(), left);
             golem.targetCrop(next.getLocation());
             golem.farmerState(FarmerState.MOVING_TO_CLEAR);
             return;
@@ -106,134 +105,30 @@ public final class FarmerSupportWork {
     }
 
     public void continueTorch(ActiveGolem golem, CopperGolem copper) {
-        applyTorchPhase(golem, this.ctx.torchWork().tick(
-                golem,
-                copper,
-                this.ctx.resolveTorch(),
-                this.ctx.settings().farmer.maxTorches
-        ));
+        this.shared.continueTorch(golem, copper);
     }
 
     public void takeTorchesFromChest(ActiveGolem golem) {
-        applyTorchPhase(golem, this.ctx.torchWork().takeFromChest(
-                golem,
-                this.ctx.resolveTorch(),
-                this.ctx.settings().farmer.torchesPerTrip,
-                this.ctx.settings().farmer.maxTorches
-        ));
-    }
-
-    private void applyTorchPhase(ActiveGolem golem, GolemTorchWork.Phase phase) {
-        switch (phase) {
-            case MOVING -> golem.farmerState(FarmerState.MOVING_TO_TORCH);
-            case PLACING -> golem.farmerState(FarmerState.PLACING_TORCH);
-            case FETCH -> golem.farmerState(FarmerState.MOVING_TO_CHEST);
-            case DONE -> golem.farmerState(FarmerState.WAIT_GROWTH);
-        }
+        this.shared.takeTorchesFromChest(golem);
     }
 
     public void continueFence(ActiveGolem golem, CopperGolem copper) {
         if (!this.ctx.stationsOk(golem)) {
             return;
         }
-        applyFencePhase(golem, this.ctx.fenceWork().tick(
-                golem,
-                copper,
-                this.ctx.settings().farmer.placeFence,
-                this.ctx.settings().farmer.fencesPerTrip,
-                this.ctx::drainFarmEnergy
-        ));
+        this.shared.continueFence(golem, copper, this.ctx::drainFarmEnergy);
     }
 
     public void takeFenceFromChest(ActiveGolem golem) {
-        applyFencePhase(golem, this.ctx.fenceWork().takeFromChest(
-                golem,
-                this.ctx.settings().farmer.fencesPerTrip
-        ));
-    }
-
-    private void applyFencePhase(ActiveGolem golem, GolemFenceWork.Phase phase) {
-        switch (phase) {
-            case MOVING_CLEAR -> golem.farmerState(FarmerState.MOVING_TO_FENCE_CLEAR);
-            case CLEARING -> golem.farmerState(FarmerState.CLEARING_FENCE);
-            case MOVING_FENCE -> golem.farmerState(FarmerState.MOVING_TO_FENCE);
-            case PLACING_FENCE -> golem.farmerState(FarmerState.PLACING_FENCE);
-            case MOVING_GATE -> golem.farmerState(FarmerState.MOVING_TO_GATE);
-            case PLACING_GATE -> golem.farmerState(FarmerState.PLACING_GATE);
-            case FETCH_FENCE, FETCH_GATE -> golem.farmerState(FarmerState.MOVING_TO_CHEST);
-            case PAUSE, DISABLED, DONE -> {
-                golem.wanderTarget(null);
-                this.cycle.resumeAfterClear(golem);
-            }
-        }
+        this.shared.takeFenceFromChest(golem);
     }
 
     public void continueShelter(ActiveGolem golem, CopperGolem copper) {
-        applyShelterPhase(golem, copper, this.ctx.rainShelter().tick(
-                golem,
-                copper,
-                this.ctx.settings().farmer.rainShelter
-        ));
+        this.shared.continueShelter(golem, copper);
     }
 
     public void continueCloseGate(ActiveGolem golem, CopperGolem copper) {
-        GolemGateWatch.Phase phase = this.ctx.gateWatch().tickClose(golem, copper);
-        switch (phase) {
-            case MOVING -> golem.farmerState(FarmerState.MOVING_TO_CLOSE_GATE);
-            case CLOSING, DONE -> {
-                golem.wanderTarget(null);
-                if (tryResumePausedSeat(golem)) {
-                    return;
-                }
-                if (this.ctx.settings().farmer.rainShelter
-                        && this.ctx.rainShelter().shouldSeekShelter(golem, copper, true)) {
-                    golem.clearFetchFlags();
-                    golem.farmerState(FarmerState.MOVING_TO_SHELTER);
-                    continueShelter(golem, copper);
-                } else {
-                    this.cycle.resumeAfterClear(golem);
-                }
-            }
-            case IDLE -> {
-                if (tryResumePausedSeat(golem)) {
-                    return;
-                }
-                golem.farmerState(FarmerState.WAITING_SEEDS);
-            }
-        }
-    }
-
-    private boolean tryResumePausedSeat(ActiveGolem golem) {
-        if (!golem.resumeSeatRest()) {
-            return false;
-        }
-        if (!this.ctx.farmAreaService().hasValidSeat(golem.data())) {
-            golem.resumeSeatRest(false);
-            return false;
-        }
-        golem.clearFetchFlags();
-        golem.wanderTarget(null);
-        golem.targetCrop(null);
-        golem.farmerState(FarmerState.MOVING_TO_SEAT);
-        return true;
-    }
-
-    private void applyShelterPhase(ActiveGolem golem, CopperGolem copper, GolemRainShelterWork.Phase phase) {
-        switch (phase) {
-            case MOVING -> golem.farmerState(FarmerState.MOVING_TO_SHELTER);
-            case BUILDING -> golem.farmerState(FarmerState.BUILDING_SHELTER);
-            case SHELTERING -> golem.farmerState(FarmerState.SHELTERING);
-            case DISABLED, UNAVAILABLE, DONE -> {
-                golem.wanderTarget(null);
-                GolemAiMode.enable(
-                        this.ctx.plugin(),
-                        copper,
-                        this.ctx.registry(),
-                        this.ctx.keys()
-                );
-                this.cycle.resumeAfterClear(golem);
-            }
-        }
+        this.shared.continueCloseGate(golem, copper);
     }
 
     public void continueSeat(ActiveGolem golem, CopperGolem copper) {
@@ -259,12 +154,12 @@ public final class FarmerSupportWork {
                 if (this.cycle.assignNextJob(golem)) {
                     return;
                 }
-                if (this.ctx.settings().farmer.collectGroundLoot
+                if (this.ctx.settings().yard.collectGroundLoot
                         && this.ctx.groundLoot().hasLoot(golem.data())) {
                     golem.farmerState(FarmerState.WAIT_GROWTH);
                     return;
                 }
-                applySeatPhase(golem, this.ctx.seatWork().sitOnBench(golem, copper));
+                this.shared.applySeatPhase(golem, this.ctx.seatWork().sitOnBench(golem, copper));
                 return;
             }
             this.ctx.seatWork().holdOnBench(golem, copper);
@@ -276,9 +171,9 @@ public final class FarmerSupportWork {
         }
 
         int radius = this.ctx.chestService().effectiveRadius(golem.data());
-        Material carriedStairs = FarmerCarried.carriedStairs(golem);
+        Material carriedStairs = GolemCarried.carriedStairs(golem);
         if (carriedStairs != null && !this.ctx.farmAreaService().hasValidSeat(golem.data())) {
-            applySeatPhase(golem, this.ctx.seatWork().placeCarriedSeat(golem, copper, carriedStairs, radius));
+            this.shared.placeCarriedSeat(golem, copper, carriedStairs, radius);
             return;
         }
 
@@ -290,7 +185,11 @@ public final class FarmerSupportWork {
             return;
         }
 
-        applySeatPhase(golem, this.ctx.seatWork().sitOnBench(golem, copper));
+        GolemSeatWork.Phase phase = this.ctx.seatWork().sitOnBench(golem, copper);
+        this.shared.applySeatPhase(golem, phase);
+        if (phase == GolemSeatWork.Phase.SITTING && golem.pauseAfterRest()) {
+            GolemControlService.finishPauseAfterRest(golem, this.ctx.repository());
+        }
     }
 
     private boolean shouldLeaveSeat(ActiveGolem golem) {
@@ -312,7 +211,8 @@ public final class FarmerSupportWork {
         if (this.ctx.hasPlantWork(golem)) {
             return true;
         }
-        Settings.Farmer farmer = this.ctx.settings().farmer;
+        GolemSettings.Farmer farmer = this.ctx.settings().farmer;
+        GolemSettings.Yard yard = this.ctx.settings().yard;
         if (farmer.useBoneMeal && this.ctx.hasBoneMealWork(golem)) {
             return true;
         }
@@ -332,35 +232,25 @@ public final class FarmerSupportWork {
         if (this.chest != null && this.chest.needsPlaceCraft(golem)) {
             return true;
         }
-        if (canStartTorchJob(golem, radius, farmer)) {
+        if (canStartTorchJob(golem, radius, yard)) {
             return true;
         }
-        if (farmer.collectGroundLoot && this.ctx.groundLoot().hasLoot(golem.data())) {
+        if (yard.collectGroundLoot && this.ctx.groundLoot().hasLoot(golem.data())) {
             return true;
         }
-        if (!farmer.placeFence) {
+        if (!yard.placeFence) {
             return false;
         }
         return this.ctx.farmAreaService().canProgressOuterFence(
                 golem.data(),
                 radius,
-                countCarriedTagged(golem, org.bukkit.Tag.FENCES),
-                countCarriedTagged(golem, org.bukkit.Tag.FENCE_GATES)
+                GolemCarried.countTagged(golem, Tag.FENCES),
+                GolemCarried.countTagged(golem, Tag.FENCE_GATES)
         );
     }
 
-    private static int countCarriedTagged(ActiveGolem golem, org.bukkit.Tag<Material> tag) {
-        int total = 0;
-        for (ItemStack stack : golem.carried()) {
-            if (stack != null && tag.isTagged(stack.getType())) {
-                total += stack.getAmount();
-            }
-        }
-        return total;
-    }
-
-    private boolean canStartTorchJob(ActiveGolem golem, int radius, Settings.Farmer farmer) {
-        if (!farmer.placeTorches) {
+    private boolean canStartTorchJob(ActiveGolem golem, int radius, GolemSettings.Yard yard) {
+        if (!yard.placeTorches) {
             return false;
         }
         Material torch = this.ctx.resolveTorch();
@@ -368,99 +258,15 @@ public final class FarmerSupportWork {
                 && !this.ctx.farmAreaService().perimeterTorchSpots(golem.data(), radius).isEmpty();
     }
 
-    private void applySeatPhase(ActiveGolem golem, GolemSeatWork.Phase phase) {
-        switch (phase) {
-            case MOVING, PLACING -> golem.farmerState(FarmerState.MOVING_TO_SEAT);
-            case SITTING -> {
-                golem.farmerState(FarmerState.SITTING);
-                if (golem.pauseAfterRest()) {
-                    GolemControlService.finishPauseAfterRest(golem, this.ctx.repository());
-                }
-            }
-            case UNAVAILABLE, DONE -> golem.farmerState(FarmerState.WAIT_GROWTH);
-        }
-    }
-
     public void placeCarriedSeat(ActiveGolem golem, CopperGolem copper, Material carriedStairs, int radius) {
-        applySeatPhase(golem, this.ctx.seatWork().placeCarriedSeat(golem, copper, carriedStairs, radius));
+        this.shared.placeCarriedSeat(golem, copper, carriedStairs, radius);
     }
 
     public void takeSeatFromChest(ActiveGolem golem) {
-        int radius = this.ctx.chestService().effectiveRadius(golem.data());
-        if (this.ctx.farmAreaService().hasValidSeat(golem.data())) {
-            golem.clearFetchFlags();
-            golem.farmerState(FarmerState.MOVING_TO_SEAT);
-            return;
-        }
-        Material already = FarmerCarried.carriedStairs(golem);
-        if (already != null) {
-            Block spot = this.ctx.farmAreaService().findSeatSpot(golem.data(), radius);
-            if (spot == null) {
-                this.carried.returnCarriedToChest(golem, already);
-                golem.clearFetchFlags();
-                golem.farmerState(FarmerState.WAIT_GROWTH);
-                return;
-            }
-            golem.clearFetchFlags();
-            golem.targetCrop(spot.getLocation());
-            golem.farmerState(FarmerState.MOVING_TO_SEAT);
-            return;
-        }
-        Material stairs = this.ctx.chestService().findStairsInChest(golem.data());
-        Block spot = this.ctx.farmAreaService().findSeatSpot(golem.data(), radius);
-        if (stairs == null || spot == null) {
-            golem.clearFetchFlags();
-            golem.farmerState(FarmerState.WAIT_GROWTH);
-            return;
-        }
-        if (!this.ctx.chestService().takeItem(golem.data(), stairs, 1)) {
-            golem.clearFetchFlags();
-            golem.farmerState(FarmerState.WAIT_GROWTH);
-            return;
-        }
-        golem.clearCarried();
-        golem.carry(new ItemStack(stairs, 1));
-        golem.clearFetchFlags();
-        golem.targetCrop(spot.getLocation());
-        golem.farmerState(FarmerState.MOVING_TO_SEAT);
-        golem.markDirty();
+        this.shared.takeSeatFromChest(golem, () -> golem.farmerState(FarmerState.WAIT_GROWTH));
     }
 
     public boolean isBorderBlock(Block block) {
         return this.ctx.farmAreaService().isBorderMaterial(block.getType());
-    }
-
-    public static Block pickNearestJunk(Location from, List<Block> list) {
-        Block best = list.get(0);
-        double bestDist = Double.MAX_VALUE;
-        for (Block block : list) {
-            double dx = block.getX() + 0.5D - from.getX();
-            double dz = block.getZ() + 0.5D - from.getZ();
-            double dist = dx * dx + dz * dz;
-            if (dist < bestDist) {
-                bestDist = dist;
-                best = block;
-            }
-        }
-        return best;
-    }
-
-    public static boolean isClearableJunk(Block block) {
-        Material type = block.getType();
-        if (type.isAir() || SoulChestService.isChestLike(type) || type == Material.CRAFTING_TABLE || type == Material.COMPOSTER
-                || type == Material.FURNACE || type == Material.BLAST_FURNACE || type == Material.SMOKER) {
-            return false;
-        }
-        if (org.bukkit.Tag.STAIRS.isTagged(type) || FarmAreaService.isAnyCrop(type)) {
-            return false;
-        }
-        if (org.bukkit.Tag.FENCES.isTagged(type) || org.bukkit.Tag.FENCE_GATES.isTagged(type)) {
-            return false;
-        }
-        if (type == Material.TORCH || type == Material.WALL_TORCH
-                || type == Material.SOUL_TORCH || type == Material.SOUL_WALL_TORCH) {
-            return false;
-        }
-        return type.isSolid() || type == Material.SNOW || FarmAreaService.isVegetation(type);
     }
 }

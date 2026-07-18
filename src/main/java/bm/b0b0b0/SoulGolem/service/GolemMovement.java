@@ -1,6 +1,6 @@
 package bm.b0b0b0.SoulGolem.service;
 
-import bm.b0b0b0.SoulGolem.config.settings.Settings;
+import bm.b0b0b0.SoulGolem.config.settings.GolemSettings;
 import bm.b0b0b0.SoulGolem.model.ActiveGolem;
 import bm.b0b0b0.SoulGolem.model.SoulGolemData;
 import com.destroystokyo.paper.entity.Pathfinder;
@@ -16,15 +16,15 @@ public final class GolemMovement {
     private static final double ARRIVE_SQ = 0.36D;
     private static final double SAME_GOAL_SQ = 1.21D;
 
-    private final Settings settings;
+    private final GolemSettings settings;
     private final SoulChestService chestService;
     private final FarmAreaService farmAreaService;
 
-    public GolemMovement(Settings settings, SoulChestService chestService) {
+    public GolemMovement(GolemSettings settings, SoulChestService chestService) {
         this(settings, chestService, null);
     }
 
-    public GolemMovement(Settings settings, SoulChestService chestService, FarmAreaService farmAreaService) {
+    public GolemMovement(GolemSettings settings, SoulChestService chestService, FarmAreaService farmAreaService) {
         this.settings = settings;
         this.chestService = chestService;
         this.farmAreaService = farmAreaService;

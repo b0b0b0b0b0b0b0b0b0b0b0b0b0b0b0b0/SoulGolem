@@ -175,7 +175,7 @@ public final class SoulGolemCommand implements CommandExecutor, TabCompleter {
                 if (!"give".equalsIgnoreCase(args[0]) || !has(sender, perms.give)) {
                     yield List.of();
                 }
-                yield filter(List.of("miner", "farmer"), args[2]);
+                yield filter(List.of("miner", "farmer", "digger"), args[2]);
             }
             default -> List.of();
         };
@@ -202,6 +202,9 @@ public final class SoulGolemCommand implements CommandExecutor, TabCompleter {
         }
         if ("farmer".equalsIgnoreCase(raw)) {
             return GolemType.FARMER;
+        }
+        if ("digger".equalsIgnoreCase(raw)) {
+            return GolemType.DIGGER;
         }
         return null;
     }

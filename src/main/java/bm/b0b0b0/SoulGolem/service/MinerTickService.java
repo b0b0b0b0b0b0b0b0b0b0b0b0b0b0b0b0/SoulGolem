@@ -1,7 +1,7 @@
 package bm.b0b0b0.SoulGolem.service;
 
 import bm.b0b0b0.SoulGolem.config.ConfigurationLoader;
-import bm.b0b0b0.SoulGolem.config.settings.Settings;
+import bm.b0b0b0.SoulGolem.config.settings.GolemSettings;
 import bm.b0b0b0.SoulGolem.model.ActiveGolem;
 import bm.b0b0b0.SoulGolem.model.GolemType;
 import bm.b0b0b0.SoulGolem.model.MinerState;
@@ -63,7 +63,7 @@ public final class MinerTickService {
         );
         MinerCarried carried = new MinerCarried(this.context);
         this.mine = new MinerMineWork(this.context);
-        this.support = new MinerSupportWork(this.context, carried);
+        this.support = new MinerSupportWork(this.context);
         this.chest = new MinerChestWork(this.context, carried);
         this.setup = new GolemSetupWork(
                 chestService,
@@ -205,7 +205,7 @@ public final class MinerTickService {
         }
 
         long now = System.currentTimeMillis();
-        long effectiveInterval = this.context.effectiveWorkIntervalMs(data);
+        long effectiveInterval = this.context.effectiveWorkIntervalMs(golem);
         if (!setupBusy
                 && state != MinerState.MINING
                 && state != MinerState.MOVING_TO_ORE
@@ -255,12 +255,12 @@ public final class MinerTickService {
         } else {
             boolean closingGate = state == MinerState.MOVING_TO_CLOSE_GATE
                     || state == MinerState.CLOSING_GATE;
-            Settings.Miner miner = this.context.settings().miner;
+            GolemSettings.Yard yard = this.context.settings().yard;
             boolean inShelter = state == MinerState.MOVING_TO_SHELTER
                     || state == MinerState.BUILDING_SHELTER
                     || state == MinerState.SHELTERING;
             if (inShelter) {
-                if (!miner.rainShelter
+                if (!yard.rainShelter
                         || !this.context.rainShelter().shouldContinueShelter(golem, copper)) {
                     this.support.continueShelter(golem, copper);
                     GolemDisplay.refresh(
@@ -273,7 +273,7 @@ public final class MinerTickService {
                     return;
                 }
             }
-            if (miner.placeFence && miner.gateAutoClose) {
+            if (yard.placeFence && yard.gateAutoClose) {
                 if (closingGate) {
                     this.support.continueCloseGate(golem, copper);
                     GolemDisplay.refresh(
@@ -285,7 +285,7 @@ public final class MinerTickService {
                     );
                     return;
                 }
-                if (this.context.gateWatch().shouldStartClose(golem, true, miner.gateCloseDelayMs)) {
+                if (this.context.gateWatch().shouldStartClose(golem, true, yard.gateCloseDelayMs)) {
                     if (state == MinerState.SITTING
                             || state == MinerState.MOVING_TO_SEAT
                             || state == MinerState.PLACING_SEAT) {
@@ -320,7 +320,7 @@ public final class MinerTickService {
                     return;
                 }
             }
-            if (miner.rainShelter && this.context.rainShelter().shouldSeekShelter(golem, copper, true)) {
+            if (yard.rainShelter && this.context.rainShelter().shouldSeekShelter(golem, copper, true)) {
                 if (state != MinerState.MOVING_TO_SHELTER
                         && state != MinerState.BUILDING_SHELTER
                         && state != MinerState.SHELTERING) {

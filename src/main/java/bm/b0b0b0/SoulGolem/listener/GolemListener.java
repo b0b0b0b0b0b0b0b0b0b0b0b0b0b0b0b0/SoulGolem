@@ -1,9 +1,11 @@
 package bm.b0b0b0.SoulGolem.listener;
 
 import bm.b0b0b0.SoulGolem.config.ConfigurationLoader;
+import bm.b0b0b0.SoulGolem.gui.GolemGuiService;
 import bm.b0b0b0.SoulGolem.item.StatueItemFactory;
 import bm.b0b0b0.SoulGolem.message.MessageService;
 import bm.b0b0b0.SoulGolem.model.ActiveGolem;
+import bm.b0b0b0.SoulGolem.model.GolemType;
 import bm.b0b0b0.SoulGolem.repository.GolemRepository;
 import bm.b0b0b0.SoulGolem.service.FarmAreaService;
 import bm.b0b0b0.SoulGolem.service.GolemCombatWork;
@@ -13,12 +15,19 @@ import bm.b0b0b0.SoulGolem.service.GolemRegistry;
 import bm.b0b0b0.SoulGolem.service.GolemSpawnService;
 import bm.b0b0b0.SoulGolem.service.SoulChestService;
 import bm.b0b0b0.SoulGolem.service.WorkAreaService;
+import bm.b0b0b0.SoulGolem.service.digger.DiggerPit;
 import bm.b0b0b0.SoulGolem.util.PluginKeys;
 import java.util.Optional;
 import java.util.UUID;
 import org.bukkit.GameMode;
+import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.NamespacedKey;
+import org.bukkit.Particle;
+import org.bukkit.Registry;
+import org.bukkit.Sound;
 import org.bukkit.Tag;
+import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.entity.CopperGolem;
@@ -39,6 +48,7 @@ import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.entity.EntityDropItemEvent;
 import org.bukkit.event.entity.EntityExplodeEvent;
 import org.bukkit.event.entity.EntityTargetEvent;
+import org.bukkit.event.world.EntitiesLoadEvent;
 import org.bukkit.event.inventory.InventoryMoveItemEvent;
 import org.bukkit.event.player.PlayerBucketEmptyEvent;
 import org.bukkit.event.player.PlayerBucketFillEvent;
@@ -59,6 +69,7 @@ public final class GolemListener implements Listener {
     private final FarmAreaService farmAreaService;
     private final GolemRegistry registry;
     private final GolemRepository repository;
+    private final GolemGuiService guiService;
     private final GolemCombatWork combat;
 
     public GolemListener(
@@ -70,7 +81,8 @@ public final class GolemListener implements Listener {
             WorkAreaService workAreaService,
             FarmAreaService farmAreaService,
             GolemRegistry registry,
-            GolemRepository repository
+            GolemRepository repository,
+            GolemGuiService guiService
     ) {
         this.configurationLoader = configurationLoader;
         this.keys = keys;
@@ -81,15 +93,16 @@ public final class GolemListener implements Listener {
         this.farmAreaService = farmAreaService;
         this.registry = registry;
         this.repository = repository;
+        this.guiService = guiService;
         this.combat = new GolemCombatWork(
                 chestService,
                 workAreaService,
                 new GolemMovement(
-                        configurationLoader.config().settings(),
+                        configurationLoader.config().golems(),
                         chestService,
                         farmAreaService
                 ),
-                () -> configurationLoader.config().settings()
+                () -> configurationLoader.config().golems()
         );
     }
 
@@ -165,6 +178,27 @@ public final class GolemListener implements Listener {
 
     private boolean isOwnerCropBreak(Player player, Block block) {
         return isTerritoryOwner(player, block) && FarmAreaService.isAnyCrop(block.getType());
+    }
+
+    private boolean isOwnerDiggerAssistBreak(Player player, Block block) {
+        if (player == null || block == null) {
+            return false;
+        }
+        Optional<ActiveGolem> golem = findTerritoryGolem(block);
+        if (golem.isEmpty() || !player.getUniqueId().equals(golem.get().data().ownerUuid())) {
+            return false;
+        }
+        if (golem.get().data().type() != GolemType.DIGGER) {
+            return false;
+        }
+        var digger = this.configurationLoader.config().golems().digger;
+        return DiggerPit.isDiggable(
+                block,
+                golem.get().data(),
+                this.chestService,
+                this.farmAreaService,
+                digger
+        );
     }
 
     private boolean isOwnerGateBreak(Player player, Block block) {
@@ -270,7 +304,7 @@ public final class GolemListener implements Listener {
         if (!isTerritory(block)) {
             return;
         }
-        if (canBypassTerritory(player) || isOwnerCropBreak(player, block)) {
+        if (canBypassTerritory(player) || isOwnerCropBreak(player, block) || isOwnerDiggerAssistBreak(player, block)) {
             return;
         }
         if (isOwnerGateBreak(player, block)) {
@@ -311,7 +345,7 @@ public final class GolemListener implements Listener {
         if (block == null || block.getType() != Material.CRAFTING_TABLE) {
             return;
         }
-        if (!this.configurationLoader.config().settings().farmer.denyCraftOpen) {
+        if (!this.configurationLoader.config().golems().farmer.denyCraftOpen) {
             return;
         }
         if (!this.chestService.isSoulCraftingTable(block) && !isRegisteredCraftTable(block)) {
@@ -350,7 +384,8 @@ public final class GolemListener implements Listener {
             }
             return;
         }
-        if (event.getAction() == Action.LEFT_CLICK_BLOCK && isOwnerCropBreak(player, block)) {
+        if (event.getAction() == Action.LEFT_CLICK_BLOCK
+                && (isOwnerCropBreak(player, block) || isOwnerDiggerAssistBreak(player, block))) {
             return;
         }
         if (event.getAction() == Action.LEFT_CLICK_BLOCK && isOwnerGateBreak(player, block)) {
@@ -509,7 +544,7 @@ public final class GolemListener implements Listener {
             golem.markDirty();
             this.repository.save(golem.data());
             if (event.getRightClicked() instanceof CopperGolem copper) {
-                GolemDisplay.refreshForce(golem, copper, messages(), this.keys, this.configurationLoader.config().settings().visuals.textDisplays);
+                GolemDisplay.refreshForce(golem, copper, messages(), this.keys, this.configurationLoader.config().golems().visuals.textDisplays);
             }
             messages().send(player, paused ? "golem-paused" : "golem-resumed");
             return;
@@ -525,10 +560,12 @@ public final class GolemListener implements Listener {
                     copper,
                     messages(),
                     this.keys,
-                    this.configurationLoader.config().settings().visuals.textDisplays
+                    this.configurationLoader.config().golems().visuals.textDisplays
             );
             messages().send(player, "golem-armed");
+            return;
         }
+        this.guiService.openManage(player, golem.data().id(), 0);
     }
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
@@ -599,8 +636,46 @@ public final class GolemListener implements Listener {
                 }
                 return;
             }
+            ItemStack hand = player.getInventory().getItemInMainHand();
+            if (hand != null
+                    && hand.getType() == Material.STICK
+                    && this.configurationLoader.config().golems().stickBoostEnabled) {
+                event.setCancelled(true);
+                long duration = Math.max(1000L, this.configurationLoader.config().golems().stickBoostDurationMs);
+                golem.workBoostUntilMs(System.currentTimeMillis() + duration);
+                golem.data().lastActionAt(0L);
+                playStickBoostFx(entity.getLocation());
+                messages().send(player, "golem-stick-boost");
+                return;
+            }
         }
         event.setCancelled(true);
+    }
+
+    private void playStickBoostFx(Location at) {
+        if (at == null || at.getWorld() == null) {
+            return;
+        }
+        World world = at.getWorld();
+        Location fx = at.clone().add(0.0D, 0.9D, 0.0D);
+        world.spawnParticle(Particle.ANGRY_VILLAGER, fx, 6, 0.25D, 0.35D, 0.25D, 0.0D);
+        world.spawnParticle(Particle.CRIT, fx, 12, 0.3D, 0.4D, 0.3D, 0.05D);
+        Sound sound = Registry.SOUNDS.get(NamespacedKey.minecraft("entity.copper_golem.hurt"));
+        if (sound == null) {
+            sound = Registry.SOUNDS.get(NamespacedKey.minecraft("entity.iron_golem.hurt"));
+        }
+        if (sound != null) {
+            world.playSound(fx, sound, 0.55F, 1.35F);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onEntitiesLoad(EntitiesLoadEvent event) {
+        for (Entity entity : event.getEntities()) {
+            if (entity instanceof CopperGolem copper) {
+                this.spawnService.handleChunkSoulEntity(copper);
+            }
+        }
     }
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)

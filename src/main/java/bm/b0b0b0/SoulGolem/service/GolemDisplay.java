@@ -1,6 +1,6 @@
 package bm.b0b0b0.SoulGolem.service;
 
-import bm.b0b0b0.SoulGolem.config.settings.Settings;
+import bm.b0b0b0.SoulGolem.config.settings.GolemSettings;
 import bm.b0b0b0.SoulGolem.message.MessageService;
 import bm.b0b0b0.SoulGolem.model.ActiveGolem;
 import bm.b0b0b0.SoulGolem.model.GolemType;
@@ -20,7 +20,11 @@ public final class GolemDisplay {
     }
 
     public static String nameKey(ActiveGolem golem) {
-        return golem.data().type() == GolemType.FARMER ? "golem-name-farmer" : "golem-name-miner";
+        return switch (golem.data().type()) {
+            case FARMER -> "golem-name-farmer";
+            case DIGGER -> golem.data().isCrewHelper() ? "golem-name-digger" : "golem-name-digger-leader";
+            default -> "golem-name-miner";
+        };
     }
 
     public static String statusKey(ActiveGolem golem) {
@@ -32,6 +36,52 @@ public final class GolemDisplay {
         }
         if (!golem.setupComplete() && bm.b0b0b0.SoulGolem.service.setup.GolemSetupWork.isSetupState(golem)) {
             return "golem-status-setup";
+        }
+        if (golem.data().type() == GolemType.DIGGER) {
+            return switch (golem.diggerState()) {
+                case DIGGING, MOVING_TO_DIG -> "golem-status-digging";
+                case PLACING_STAIR -> "golem-status-placing-stair";
+                case ESCAPING -> golem.crewReturning() ? "golem-status-crew-return" : "golem-status-escaping";
+                case DONE -> "golem-status-dig-done";
+                case MOVING_TO_CLEAR, CLEARING -> "golem-status-clearing";
+                case MOVING_TO_FENCE_CLEAR, CLEARING_FENCE -> "golem-status-fence-clear";
+                case MOVING_TO_FENCE, PLACING_FENCE -> "golem-status-fence";
+                case MOVING_TO_GATE, PLACING_GATE -> "golem-status-gate";
+                case MOVING_TO_CLOSE_GATE, CLOSING_GATE -> "golem-status-closing-gate";
+                case MOVING_TO_SHELTER, BUILDING_SHELTER, SHELTERING -> "golem-status-shelter";
+                case MOVING_TO_COMBAT, COMBATING -> "golem-status-combat";
+                case MOVING_TO_TORCH, PLACING_TORCH -> "golem-status-torch";
+                case PLACING_SEAT -> "golem-status-seat";
+                case MOVING_TO_SEAT -> carryingStairs(golem) ? "golem-status-seat" : "golem-status-sitting";
+                case SITTING -> "golem-status-sitting";
+                case RESTING -> "golem-status-resting";
+                case WAITING_CHEST -> "golem-status-waiting-chest";
+                case MOVING_TO_CHEST -> {
+                    if (golem.crewReturning()) {
+                        yield "golem-status-crew-return";
+                    }
+                    if (golem.fetchingFeed()) {
+                        yield "golem-status-hungry";
+                    }
+                    if (golem.fetchingTorch()) {
+                        yield "golem-status-torch";
+                    }
+                    if (golem.fetchingFence() || golem.fetchingGate()) {
+                        yield golem.fetchingGate() ? "golem-status-gate" : "golem-status-fence";
+                    }
+                    if (golem.fetchingSeat()) {
+                        yield "golem-status-seat";
+                    }
+                    if (golem.fetchingWeapon()) {
+                        yield "golem-status-combat";
+                    }
+                    yield "golem-status-carrying";
+                }
+                case MOVING_TO_SETUP_CLEAR, SETUP_CLEAR,
+                     MOVING_TO_SETUP_BORDER, SETUP_BORDER,
+                     MOVING_TO_SETUP_CHEST, SETUP_CHEST -> "golem-status-setup";
+                default -> "golem-status-working";
+            };
         }
         if (golem.data().type() == GolemType.FARMER) {
             return switch (golem.farmerState()) {
@@ -157,8 +207,9 @@ public final class GolemDisplay {
             CopperGolem copper,
             MessageService messages,
             PluginKeys keys,
-            Settings.TextDisplays style
+            GolemSettings.TextDisplays style
     ) {
+        GolemSpawnService.applyDiggerLeaderGlow(copper, golem.data());
         if (style == null || !style.enabled) {
             return;
         }
@@ -193,8 +244,15 @@ public final class GolemDisplay {
     }
 
     private static String restTimer(ActiveGolem golem) {
-        if (golem.data().type() != GolemType.MINER) {
+        if (golem.data().type() == GolemType.FARMER) {
             return "";
+        }
+        if (golem.data().type() == GolemType.DIGGER) {
+            return switch (golem.diggerState()) {
+                case RESTING, SITTING -> formatTicks(golem.restTicksLeft());
+                case MOVING_TO_SEAT -> carryingStairs(golem) ? "" : formatTicks(golem.restTicksLeft());
+                default -> "";
+            };
         }
         return switch (golem.state()) {
             case RESTING, SITTING -> formatTicks(golem.restTicksLeft());
@@ -215,8 +273,9 @@ public final class GolemDisplay {
             CopperGolem copper,
             MessageService messages,
             PluginKeys keys,
-            Settings.TextDisplays style
+            GolemSettings.TextDisplays style
     ) {
+        GolemSpawnService.applyDiggerLeaderGlow(copper, golem.data());
         if (style == null || !style.enabled) {
             return;
         }
@@ -275,7 +334,7 @@ public final class GolemDisplay {
             CopperGolem copper,
             String golemId,
             PluginKeys keys,
-            Settings.TextDisplays style
+            GolemSettings.TextDisplays style
     ) {
         TextDisplay kept = null;
         for (Entity passenger : copper.getPassengers()) {

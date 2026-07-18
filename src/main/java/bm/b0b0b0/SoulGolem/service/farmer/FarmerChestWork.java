@@ -5,6 +5,7 @@ import bm.b0b0b0.SoulGolem.model.FarmerState;
 import bm.b0b0b0.SoulGolem.service.GolemGaze;
 import bm.b0b0b0.SoulGolem.service.GolemMovement;
 import bm.b0b0b0.SoulGolem.service.SoulChestLid;
+import bm.b0b0b0.SoulGolem.service.SoulChestLink;
 import java.util.ArrayList;
 import java.util.List;
 import org.bukkit.Location;
@@ -45,94 +46,104 @@ public final class FarmerChestWork {
     }
 
     public void continueDeposit(ActiveGolem golem, CopperGolem copper) {
+        SoulChestLink link = this.ctx.chestLink();
         Location chestStand = this.ctx.chestService().chestStandLocation(golem.data());
         if (chestStand == null) {
             lid().closeNow(golem.data());
             golem.farmerState(FarmerState.WAITING_SEEDS);
             return;
         }
-        if (GolemMovement.horizontalDistanceSquared(copper.getLocation(), chestStand) > 1.69D) {
+        boolean linked = link.isLinked(golem.data());
+        if (!link.canAccess(copper, golem.data())) {
             lid().closeNow(golem.data());
             this.ctx.movement().walkTowards(copper, chestStand, golem);
             return;
         }
         this.ctx.movement().stop(copper);
         copper.setVelocity(new Vector(0, 0, 0));
-        Location chestLook = new Location(
-                copper.getWorld(),
-                golem.data().chestX() + 0.5D,
-                golem.data().chestY() + 0.5D,
-                golem.data().chestZ() + 0.5D
-        );
-        GolemGaze.face(golem, chestLook);
-        lid().open(golem.data());
+        if (!linked) {
+            Location chestLook = new Location(
+                    copper.getWorld(),
+                    golem.data().chestX() + 0.5D,
+                    golem.data().chestY() + 0.5D,
+                    golem.data().chestZ() + 0.5D
+            );
+            GolemGaze.face(golem, chestLook);
+            lid().open(golem.data());
+        }
 
         if (golem.fetchingSeed()) {
             this.field.takeSeedFromChest(golem);
-            lid().closeLater(golem.data());
+            finishChestAccess(golem, copper, linked, SoulChestLink.Kind.WITHDRAW);
             return;
         }
         if (golem.fetchingFeed()) {
             this.ctx.eatFeedFromChest(golem);
-            lid().closeLater(golem.data());
+            finishChestAccess(golem, copper, linked, SoulChestLink.Kind.WITHDRAW);
             return;
         }
         if (golem.fetchingSeat()) {
             this.support.takeSeatFromChest(golem);
-            lid().closeLater(golem.data());
+            finishChestAccess(golem, copper, linked, SoulChestLink.Kind.WITHDRAW);
             return;
         }
         if (golem.fetchingTorch()) {
             this.support.takeTorchesFromChest(golem);
-            lid().closeLater(golem.data());
+            finishChestAccess(golem, copper, linked, SoulChestLink.Kind.WITHDRAW);
             return;
         }
         if (golem.fetchingFence() || golem.fetchingGate()) {
             this.support.takeFenceFromChest(golem);
-            lid().closeLater(golem.data());
+            finishChestAccess(golem, copper, linked, SoulChestLink.Kind.WITHDRAW);
             return;
         }
         if (golem.fetchingBoneMeal()) {
             this.field.takeBoneMealFromChest(golem);
-            lid().closeLater(golem.data());
+            finishChestAccess(golem, copper, linked, SoulChestLink.Kind.WITHDRAW);
             return;
         }
         if (golem.fetchingCraft()) {
             takeCraftFromChest(golem);
-            lid().closeLater(golem.data());
+            finishChestAccess(golem, copper, linked, SoulChestLink.Kind.WITHDRAW);
             return;
         }
         if (golem.fetchingComposter()) {
             this.compost.takeComposterFromChest(golem);
-            lid().closeLater(golem.data());
+            finishChestAccess(golem, copper, linked, SoulChestLink.Kind.WITHDRAW);
             return;
         }
         if (golem.fetchingCompost()) {
             this.compost.takeCompostFillFromChest(golem);
-            lid().closeLater(golem.data());
+            finishChestAccess(golem, copper, linked, SoulChestLink.Kind.WITHDRAW);
             return;
         }
         if (golem.fetchingWeapon()) {
             this.ctx.combat().takeWeaponFromChest(golem, copper);
-            lid().closeLater(golem.data());
+            finishChestAccess(golem, copper, linked, SoulChestLink.Kind.WITHDRAW);
             return;
         }
 
         if (!this.ctx.hasPlantWork(golem)
                 && this.ctx.hasBoneMealWork(golem)
                 && FarmerCarried.countCarried(golem, Material.BONE_MEAL) > 0) {
-            lid().closeLater(golem.data());
+            if (!linked) {
+                lid().closeLater(golem.data());
+            }
             golem.farmerState(FarmerState.MOVING_TO_BONEMEAL);
             return;
         }
 
         if (golem.carried().isEmpty()) {
-            lid().closeLater(golem.data());
+            if (!linked) {
+                lid().closeLater(golem.data());
+            }
             this.cycle.afterDeposit(golem, copper);
             return;
         }
         if (!this.ctx.chestService().hasSpace(golem.data())) {
-            lid().closeLater(golem.data());
+            if (!linked) {
+                lid().closeLater(golem.data());
+            }
             golem.farmerState(FarmerState.WAITING_CHEST);
             this.ctx.notifyChestFull(golem);
             return;
@@ -149,13 +160,26 @@ public final class FarmerChestWork {
         for (ItemStack stack : leftover) {
             golem.carry(stack);
         }
-        lid().closeLater(golem.data());
+        finishChestAccess(golem, copper, linked, SoulChestLink.Kind.DEPOSIT);
         if (!depositedAll) {
             golem.farmerState(FarmerState.WAITING_CHEST);
             this.ctx.notifyChestFull(golem);
             return;
         }
         this.cycle.afterDeposit(golem, copper);
+    }
+
+    private void finishChestAccess(
+            ActiveGolem golem,
+            CopperGolem copper,
+            boolean linked,
+            SoulChestLink.Kind kind
+    ) {
+        if (linked) {
+            this.ctx.chestLink().play(copper, golem.data(), kind);
+            return;
+        }
+        lid().closeLater(golem.data());
     }
 
     public boolean needsPlaceCraft(ActiveGolem golem) {

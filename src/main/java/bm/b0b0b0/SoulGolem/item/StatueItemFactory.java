@@ -34,8 +34,16 @@ public final class StatueItemFactory {
         MessageService messageService = this.messages.get();
         ItemStack stack = new ItemStack(statueMaterial(resolved), Math.max(1, amount));
         ItemMeta meta = stack.getItemMeta();
-        String nameKey = resolved == GolemType.FARMER ? "statue-name-farmer" : "statue-name-miner";
-        String loreKey = resolved == GolemType.FARMER ? "statue-lore-farmer" : "statue-lore-miner";
+        String nameKey = switch (resolved) {
+            case FARMER -> "statue-name-farmer";
+            case DIGGER -> "statue-name-digger";
+            default -> "statue-name-miner";
+        };
+        String loreKey = switch (resolved) {
+            case FARMER -> "statue-lore-farmer";
+            case DIGGER -> "statue-lore-digger";
+            default -> "statue-lore-miner";
+        };
         meta.displayName(MINI.deserialize(messageService.raw(nameKey)));
         List<Component> lore = new ArrayList<>();
         for (String line : messageService.rawListLines(loreKey)) {
@@ -52,6 +60,12 @@ public final class StatueItemFactory {
         if (type == GolemType.FARMER) {
             Material oxidized = Material.matchMaterial("OXIDIZED_COPPER_GOLEM_STATUE");
             return oxidized != null ? oxidized : Material.COPPER_BLOCK;
+        }
+        if (type == GolemType.DIGGER) {
+            Material exposed = Material.matchMaterial("EXPOSED_COPPER_GOLEM_STATUE");
+            if (exposed != null) {
+                return exposed;
+            }
         }
         Material statue = Material.matchMaterial("COPPER_GOLEM_STATUE");
         return statue != null ? statue : Material.COPPER_BLOCK;

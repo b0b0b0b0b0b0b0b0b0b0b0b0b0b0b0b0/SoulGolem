@@ -1,12 +1,12 @@
 package bm.b0b0b0.SoulGolem.service.miner;
 
-import bm.b0b0b0.SoulGolem.config.settings.Settings;
+import bm.b0b0b0.SoulGolem.config.settings.GolemSettings;
 import bm.b0b0b0.SoulGolem.model.ActiveGolem;
 import bm.b0b0b0.SoulGolem.model.MinerState;
 import bm.b0b0b0.SoulGolem.service.GolemGaze;
-import bm.b0b0b0.SoulGolem.service.GolemMovement;
 import bm.b0b0b0.SoulGolem.service.GolemTorchWork;
 import bm.b0b0b0.SoulGolem.service.SoulChestLid;
+import bm.b0b0b0.SoulGolem.service.SoulChestLink;
 import java.util.ArrayList;
 import java.util.List;
 import org.bukkit.Location;
@@ -33,66 +33,74 @@ public final class MinerChestWork {
 
     public void continueDeposit(ActiveGolem golem, CopperGolem copper) {
         SoulChestLid lid = this.ctx.chestService().lid();
+        SoulChestLink link = this.ctx.chestLink();
         Location chestStand = this.ctx.chestService().chestStandLocation(golem.data());
         if (chestStand == null) {
             lid.closeNow(golem.data());
             golem.state(MinerState.IDLE);
             return;
         }
-        if (GolemMovement.horizontalDistanceSquared(copper.getLocation(), chestStand) > 1.69D) {
+        boolean linked = link.isLinked(golem.data());
+        if (!link.canAccess(copper, golem.data())) {
             lid.closeNow(golem.data());
             this.ctx.walkTowards(copper, chestStand, golem);
             return;
         }
         this.ctx.movement().stop(copper);
         copper.setVelocity(new Vector(0, 0, 0));
-        Location chestLook = new Location(
-                copper.getWorld(),
-                golem.data().chestX() + 0.5D,
-                golem.data().chestY() + 0.5D,
-                golem.data().chestZ() + 0.5D
-        );
-        GolemGaze.face(golem, chestLook);
-        lid.open(golem.data());
+        if (!linked) {
+            Location chestLook = new Location(
+                    copper.getWorld(),
+                    golem.data().chestX() + 0.5D,
+                    golem.data().chestY() + 0.5D,
+                    golem.data().chestZ() + 0.5D
+            );
+            GolemGaze.face(golem, chestLook);
+            lid.open(golem.data());
+        }
 
         if (golem.fetchingTorch()) {
             takeTorchesFromChest(golem);
-            lid.closeLater(golem.data());
+            finishChestAccess(golem, copper, linked, SoulChestLink.Kind.WITHDRAW, lid, chestStand, false);
             return;
         }
         if (golem.fetchingFence() || golem.fetchingGate()) {
             this.support.takeFenceFromChest(golem);
-            lid.closeLater(golem.data());
+            finishChestAccess(golem, copper, linked, SoulChestLink.Kind.WITHDRAW, lid, chestStand, false);
             return;
         }
         if (golem.fetchingSeat()) {
             takeSeatFromChest(golem);
-            lid.closeLater(golem.data());
+            finishChestAccess(golem, copper, linked, SoulChestLink.Kind.WITHDRAW, lid, chestStand, false);
             return;
         }
         if (golem.fetchingFeed()) {
             takeFeedFromChest(golem);
-            lid.closeLater(golem.data());
+            finishChestAccess(golem, copper, linked, SoulChestLink.Kind.WITHDRAW, lid, chestStand, false);
             return;
         }
         if (golem.fetchingPickaxe()) {
             this.ctx.pickaxeWork().swapAtChest(golem);
-            lid.closeLater(golem.data());
+            finishChestAccess(golem, copper, linked, SoulChestLink.Kind.WITHDRAW, lid, chestStand, false);
             return;
         }
         if (golem.fetchingWeapon()) {
             this.ctx.combat().takeWeaponFromChest(golem, copper);
-            lid.closeLater(golem.data());
+            finishChestAccess(golem, copper, linked, SoulChestLink.Kind.WITHDRAW, lid, chestStand, false);
             return;
         }
 
         if (golem.carried().isEmpty()) {
-            lid.closeLater(golem.data());
+            if (!linked) {
+                lid.closeLater(golem.data());
+            }
             afterDeposit(golem);
             return;
         }
         if (!this.ctx.chestService().hasSpace(golem.data())) {
-            lid.closeLater(golem.data());
+            if (!linked) {
+                lid.closeLater(golem.data());
+            }
             golem.state(MinerState.WAITING_CHEST);
             this.ctx.notifyChestFull(golem);
             return;
@@ -111,14 +119,32 @@ public final class MinerChestWork {
             golem.carry(stack);
         }
 
-        this.ctx.playDepositFx(chestStand);
-        lid.closeLater(golem.data());
+        finishChestAccess(golem, copper, linked, SoulChestLink.Kind.DEPOSIT, lid, chestStand, true);
         if (!depositedAll) {
             golem.state(MinerState.WAITING_CHEST);
             this.ctx.notifyChestFull(golem);
             return;
         }
         afterDeposit(golem);
+    }
+
+    private void finishChestAccess(
+            ActiveGolem golem,
+            CopperGolem copper,
+            boolean linked,
+            SoulChestLink.Kind kind,
+            SoulChestLid lid,
+            Location chestStand,
+            boolean localDepositFx
+    ) {
+        if (linked) {
+            this.ctx.chestLink().play(copper, golem.data(), kind);
+            return;
+        }
+        if (localDepositFx) {
+            this.ctx.playDepositFx(chestStand);
+        }
+        lid.closeLater(golem.data());
     }
 
     public void afterDeposit(ActiveGolem golem) {
@@ -136,8 +162,8 @@ public final class MinerChestWork {
             return;
         }
 
-        Settings.Miner miner = this.ctx.settings().miner;
-        if (miner.clearArea) {
+        GolemSettings.Yard yard = this.ctx.settings().yard;
+        if (yard.clearBorder) {
             List<Block> junk = this.ctx.farmAreaService().minerJunkToClear(golem.data(), radius, this.ctx.oreTable());
             if (!junk.isEmpty()) {
                 golem.clearFetchFlags();
@@ -147,23 +173,23 @@ public final class MinerChestWork {
             }
         }
         Material torch = this.ctx.resolveTorch();
-        if (miner.placeTorches
+        if (yard.placeTorches
                 && this.ctx.chestService().countItem(golem.data(), torch) > 0
-                && !this.ctx.farmAreaService().perimeterTorchSpots(golem.data(), radius, miner.maxTorches).isEmpty()) {
+                && !this.ctx.farmAreaService().perimeterTorchSpots(golem.data(), radius, yard.maxTorches).isEmpty()) {
             golem.clearFetchFlags();
             golem.fetchingTorch(true);
             golem.state(MinerState.MOVING_TO_CHEST);
             return;
         }
-        if (this.support.tryStartFenceJob(golem, radius, miner)) {
+        if (this.support.tryStartFenceJob(golem, radius)) {
             return;
         }
-        if (miner.collectGroundLoot && this.ctx.groundLoot().hasLoot(golem.data())) {
+        if (yard.collectGroundLoot && this.ctx.groundLoot().hasLoot(golem.data())) {
             golem.clearFetchFlags();
             golem.state(MinerState.SEEKING);
             return;
         }
-        if (this.support.tryGoToSeat(golem, radius, miner)) {
+        if (this.support.tryGoToSeat(golem, radius)) {
             return;
         }
         startRest(golem);
@@ -173,8 +199,8 @@ public final class MinerChestWork {
         GolemTorchWork.Phase phase = this.ctx.torchWork().takeFromChest(
                 golem,
                 this.ctx.resolveTorch(),
-                this.ctx.settings().miner.torchesPerTrip,
-                this.ctx.settings().miner.maxTorches
+                this.ctx.settings().yard.torchesPerTrip,
+                this.ctx.settings().yard.maxTorches
         );
         if (phase == GolemTorchWork.Phase.MOVING) {
             golem.state(MinerState.MOVING_TO_TORCH);
@@ -230,7 +256,7 @@ public final class MinerChestWork {
 
     public void startRest(ActiveGolem golem) {
         int radius = this.ctx.chestService().effectiveRadius(golem.data());
-        if (this.support != null && this.support.tryGoToSeat(golem, radius, this.ctx.settings().miner)) {
+        if (this.support != null && this.support.tryGoToSeat(golem, radius)) {
             return;
         }
         int mood = this.ctx.moodScore(golem.data());
@@ -252,7 +278,7 @@ public final class MinerChestWork {
         if (now - golem.data().lastActionAt() >= interval) {
             golem.data().lastActionAt(now);
             int radius = this.ctx.chestService().effectiveRadius(golem.data());
-            if (this.support != null && this.support.tryGoToSeat(golem, radius, this.ctx.settings().miner)) {
+            if (this.support != null && this.support.tryGoToSeat(golem, radius)) {
                 golem.restTicksLeft(0L);
                 return;
             }

@@ -1,9 +1,10 @@
 package bm.b0b0b0.SoulGolem.service;
 
 import bm.b0b0b0.SoulGolem.config.ConfigurationLoader;
-import bm.b0b0b0.SoulGolem.config.settings.Settings;
+import bm.b0b0b0.SoulGolem.config.settings.GolemSettings;
 import bm.b0b0b0.SoulGolem.message.MessageService;
 import bm.b0b0b0.SoulGolem.model.ActiveGolem;
+import bm.b0b0b0.SoulGolem.model.DiggerState;
 import bm.b0b0b0.SoulGolem.model.FarmerState;
 import bm.b0b0b0.SoulGolem.model.GolemType;
 import bm.b0b0b0.SoulGolem.model.MinerState;
@@ -60,16 +61,18 @@ public final class GolemControlService {
         golem.upgradePickaxe(null);
         golem.pickaxeSwapBlocked(false);
 
-        Settings settings = this.configurationLoader.config().settings();
+        GolemSettings golems = this.configurationLoader.config().golems();
         if (this.farmAreaService.hasValidSeat(golem.data())) {
-            long restTicks = golem.data().type() == GolemType.MINER
-                    ? Math.max(1L, settings.miner.seatRestTicks)
-                    : 1L;
+            long restTicks = golem.data().type() == GolemType.FARMER
+                    ? 1L
+                    : Math.max(1L, golems.miner.seatRestTicks);
             golem.restTicksLeft(restTicks);
             golem.pauseAfterRest(true);
             golem.data().paused(false);
             if (golem.data().type() == GolemType.MINER) {
                 golem.state(MinerState.MOVING_TO_SEAT);
+            } else if (golem.data().type() == GolemType.DIGGER) {
+                golem.diggerState(DiggerState.MOVING_TO_SEAT);
             } else {
                 golem.farmerState(FarmerState.MOVING_TO_SEAT);
             }
@@ -78,6 +81,9 @@ public final class GolemControlService {
             golem.data().paused(true);
             if (golem.data().type() == GolemType.MINER) {
                 golem.state(MinerState.RESTING);
+                golem.restTicksLeft(0L);
+            } else if (golem.data().type() == GolemType.DIGGER) {
+                golem.diggerState(DiggerState.RESTING);
                 golem.restTicksLeft(0L);
             } else {
                 golem.farmerState(FarmerState.WAIT_GROWTH);
@@ -159,7 +165,7 @@ public final class GolemControlService {
         if (!(entity instanceof CopperGolem copper)) {
             return;
         }
-        Settings.TextDisplays style = this.configurationLoader.config().settings().visuals.textDisplays;
+        GolemSettings.TextDisplays style = this.configurationLoader.config().golems().visuals.textDisplays;
         GolemDisplay.refreshForce(golem, copper, messages(), this.keys, style);
     }
 

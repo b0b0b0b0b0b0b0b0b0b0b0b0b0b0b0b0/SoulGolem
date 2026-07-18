@@ -1,7 +1,7 @@
 package bm.b0b0b0.SoulGolem.service;
 
 import bm.b0b0b0.SoulGolem.config.ConfigurationLoader;
-import bm.b0b0b0.SoulGolem.config.settings.Settings;
+import bm.b0b0b0.SoulGolem.config.settings.GolemSettings;
 import bm.b0b0b0.SoulGolem.model.ActiveGolem;
 import bm.b0b0b0.SoulGolem.model.FarmerState;
 import bm.b0b0b0.SoulGolem.model.GolemType;
@@ -67,7 +67,7 @@ public final class FarmerTickService {
         FarmerCarried carried = new FarmerCarried(this.context);
         this.cycle = new FarmerCycle(this.context);
         this.field = new FarmerFieldWork(this.context, carried);
-        this.support = new FarmerSupportWork(this.context, carried);
+        this.support = new FarmerSupportWork(this.context);
         this.compost = new FarmerCompostWork(this.context, carried, workAreaService);
         this.chest = new FarmerChestWork(this.context);
         this.setup = new GolemSetupWork(
@@ -196,7 +196,7 @@ public final class FarmerTickService {
             GolemSpawnService.equipTool(copper, data.type(), this.context.settings());
         }
 
-        Settings.TextDisplays style = this.context.settings().visuals.textDisplays;
+        GolemSettings.TextDisplays style = this.context.settings().visuals.textDisplays;
         if (data.paused()) {
             GolemDisplay.refresh(golem, copper, this.context.messages(), this.context.keys(), style);
             return;
@@ -213,25 +213,25 @@ public final class FarmerTickService {
 
         boolean closingGate = state == FarmerState.MOVING_TO_CLOSE_GATE
                 || state == FarmerState.CLOSING_GATE;
-        Settings.Farmer farmer = this.context.settings().farmer;
+        GolemSettings.Yard yard = this.context.settings().yard;
         boolean inShelter = state == FarmerState.MOVING_TO_SHELTER
                 || state == FarmerState.BUILDING_SHELTER
                 || state == FarmerState.SHELTERING;
         if (inShelter) {
-            if (!farmer.rainShelter
+            if (!yard.rainShelter
                     || !this.context.rainShelter().shouldContinueShelter(golem, copper)) {
                 this.support.continueShelter(golem, copper);
                 GolemDisplay.refresh(golem, copper, this.context.messages(), this.context.keys(), style);
                 return;
             }
         }
-        if (farmer.placeFence && farmer.gateAutoClose) {
+        if (yard.placeFence && yard.gateAutoClose) {
             if (closingGate) {
                 this.support.continueCloseGate(golem, copper);
                 GolemDisplay.refresh(golem, copper, this.context.messages(), this.context.keys(), style);
                 return;
             }
-            if (this.context.gateWatch().shouldStartClose(golem, true, farmer.gateCloseDelayMs)) {
+            if (this.context.gateWatch().shouldStartClose(golem, true, yard.gateCloseDelayMs)) {
                 if (state == FarmerState.SITTING
                         || state == FarmerState.MOVING_TO_SEAT
                         || state == FarmerState.PLACING_SEAT) {
@@ -260,7 +260,7 @@ public final class FarmerTickService {
             }
         }
 
-        if (farmer.rainShelter && this.context.rainShelter().shouldSeekShelter(golem, copper, true)) {
+        if (yard.rainShelter && this.context.rainShelter().shouldSeekShelter(golem, copper, true)) {
             if (state != FarmerState.MOVING_TO_SHELTER
                     && state != FarmerState.BUILDING_SHELTER
                     && state != FarmerState.SHELTERING) {

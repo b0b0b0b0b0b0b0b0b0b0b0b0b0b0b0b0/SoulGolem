@@ -19,9 +19,9 @@ public final class SqlGolemRepository implements GolemRepository {
             INSERT INTO soul_golems (
                 id, owner_uuid, type, world, x, y, z, home_x, home_y, home_z, yaw, pitch,
                 chest_x, chest_y, chest_z, craft_x, craft_y, craft_z, seat_x, seat_y, seat_z,
-                compost_x, compost_y, compost_z,
+                compost_x, compost_y, compost_z, dig_start_y, dig_layer_y, dig_stair_index, crew_leader_id,
                 entity_uuid, level, energy, paused, blocks_mined, upgrades_json, last_action_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 owner_uuid = excluded.owner_uuid,
                 type = excluded.type,
@@ -46,6 +46,10 @@ public final class SqlGolemRepository implements GolemRepository {
                 compost_x = excluded.compost_x,
                 compost_y = excluded.compost_y,
                 compost_z = excluded.compost_z,
+                dig_start_y = excluded.dig_start_y,
+                dig_layer_y = excluded.dig_layer_y,
+                dig_stair_index = excluded.dig_stair_index,
+                crew_leader_id = excluded.crew_leader_id,
                 entity_uuid = excluded.entity_uuid,
                 level = excluded.level,
                 energy = excluded.energy,
@@ -59,9 +63,9 @@ public final class SqlGolemRepository implements GolemRepository {
             INSERT INTO soul_golems (
                 id, owner_uuid, type, world, x, y, z, home_x, home_y, home_z, yaw, pitch,
                 chest_x, chest_y, chest_z, craft_x, craft_y, craft_z, seat_x, seat_y, seat_z,
-                compost_x, compost_y, compost_z,
+                compost_x, compost_y, compost_z, dig_start_y, dig_layer_y, dig_stair_index, crew_leader_id,
                 entity_uuid, level, energy, paused, blocks_mined, upgrades_json, last_action_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON DUPLICATE KEY UPDATE
                 owner_uuid = VALUES(owner_uuid),
                 type = VALUES(type),
@@ -86,6 +90,10 @@ public final class SqlGolemRepository implements GolemRepository {
                 compost_x = VALUES(compost_x),
                 compost_y = VALUES(compost_y),
                 compost_z = VALUES(compost_z),
+                dig_start_y = VALUES(dig_start_y),
+                dig_layer_y = VALUES(dig_layer_y),
+                dig_stair_index = VALUES(dig_stair_index),
+                crew_leader_id = VALUES(crew_leader_id),
                 entity_uuid = VALUES(entity_uuid),
                 level = VALUES(level),
                 energy = VALUES(energy),
@@ -121,7 +129,8 @@ public final class SqlGolemRepository implements GolemRepository {
     public CompletableFuture<Optional<SoulGolemData>> findById(UUID id) {
         return this.databaseManager.supplyAsync(() -> {
             try (Connection connection = this.databaseManager.dataSource().getConnection();
-                 PreparedStatement statement = connection.prepareStatement("SELECT * FROM soul_golems WHERE id = ?")) {
+                 PreparedStatement statement = connection.prepareStatement(
+                         "SELECT * FROM soul_golems WHERE id = ?")) {
                 statement.setString(1, id.toString());
                 try (ResultSet resultSet = statement.executeQuery()) {
                     if (resultSet.next()) {
@@ -157,7 +166,8 @@ public final class SqlGolemRepository implements GolemRepository {
         return this.databaseManager.supplyAsync(() -> {
             List<SoulGolemData> list = new ArrayList<>();
             try (Connection connection = this.databaseManager.dataSource().getConnection();
-                 PreparedStatement statement = connection.prepareStatement("SELECT * FROM soul_golems WHERE owner_uuid = ?")) {
+                 PreparedStatement statement = connection.prepareStatement(
+                         "SELECT * FROM soul_golems WHERE owner_uuid = ?")) {
                 statement.setString(1, ownerUuid.toString());
                 try (ResultSet resultSet = statement.executeQuery()) {
                     while (resultSet.next()) {
@@ -175,7 +185,8 @@ public final class SqlGolemRepository implements GolemRepository {
     public CompletableFuture<Void> delete(UUID id) {
         return this.databaseManager.runAsync(() -> {
             try (Connection connection = this.databaseManager.dataSource().getConnection();
-                 PreparedStatement statement = connection.prepareStatement("DELETE FROM soul_golems WHERE id = ?")) {
+                 PreparedStatement statement = connection.prepareStatement(
+                         "DELETE FROM soul_golems WHERE id = ?")) {
                 statement.setString(1, id.toString());
                 statement.executeUpdate();
             } catch (SQLException exception) {
@@ -228,13 +239,17 @@ public final class SqlGolemRepository implements GolemRepository {
         statement.setDouble(22, data.compostX());
         statement.setDouble(23, data.compostY());
         statement.setDouble(24, data.compostZ());
-        statement.setString(25, data.entityUuid() == null ? null : data.entityUuid().toString());
-        statement.setInt(26, data.level());
-        statement.setInt(27, data.energy());
-        statement.setInt(28, data.paused() ? 1 : 0);
-        statement.setLong(29, data.blocksMined());
-        statement.setString(30, data.upgradesJson());
-        statement.setLong(31, data.lastActionAt());
+        statement.setInt(25, data.digStartY());
+        statement.setInt(26, data.digLayerY());
+        statement.setInt(27, data.digStairIndex());
+        statement.setString(28, data.crewLeaderId() == null ? null : data.crewLeaderId().toString());
+        statement.setString(29, data.entityUuid() == null ? null : data.entityUuid().toString());
+        statement.setInt(30, data.level());
+        statement.setInt(31, data.energy());
+        statement.setInt(32, data.paused() ? 1 : 0);
+        statement.setLong(33, data.blocksMined());
+        statement.setString(34, data.upgradesJson());
+        statement.setLong(35, data.lastActionAt());
     }
 
     private static SoulGolemData map(ResultSet resultSet) throws SQLException {
@@ -271,6 +286,23 @@ public final class SqlGolemRepository implements GolemRepository {
             );
         } catch (SQLException ignored) {
             data.clearCompostPosition();
+        }
+        try {
+            data.digStartY(resultSet.getInt("dig_start_y"));
+            data.digLayerY(resultSet.getInt("dig_layer_y"));
+            data.digStairIndex(resultSet.getInt("dig_stair_index"));
+        } catch (SQLException ignored) {
+            data.digStartY(Integer.MIN_VALUE);
+            data.digLayerY(Integer.MIN_VALUE);
+            data.digStairIndex(0);
+        }
+        try {
+            String leader = resultSet.getString("crew_leader_id");
+            if (leader != null && !leader.isEmpty()) {
+                data.crewLeaderId(UUID.fromString(leader));
+            }
+        } catch (SQLException ignored) {
+            data.crewLeaderId(null);
         }
         String entity = resultSet.getString("entity_uuid");
         if (entity != null && !entity.isEmpty()) {

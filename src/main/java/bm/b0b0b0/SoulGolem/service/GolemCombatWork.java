@@ -1,7 +1,8 @@
 package bm.b0b0b0.SoulGolem.service;
 
-import bm.b0b0b0.SoulGolem.config.settings.Settings;
+import bm.b0b0b0.SoulGolem.config.settings.GolemSettings;
 import bm.b0b0b0.SoulGolem.model.ActiveGolem;
+import bm.b0b0b0.SoulGolem.model.DiggerState;
 import bm.b0b0b0.SoulGolem.model.FarmerState;
 import bm.b0b0b0.SoulGolem.model.GolemType;
 import bm.b0b0b0.SoulGolem.model.MinerState;
@@ -34,13 +35,13 @@ public final class GolemCombatWork {
     private final SoulChestService chestService;
     private final WorkAreaService workAreaService;
     private final GolemMovement movement;
-    private final Supplier<Settings> settings;
+    private final Supplier<GolemSettings> settings;
 
     public GolemCombatWork(
             SoulChestService chestService,
             WorkAreaService workAreaService,
             GolemMovement movement,
-            Supplier<Settings> settings
+            Supplier<GolemSettings> settings
     ) {
         this.chestService = chestService;
         this.workAreaService = workAreaService;
@@ -63,6 +64,10 @@ public final class GolemCombatWork {
         if (golem.data().type() == GolemType.FARMER) {
             FarmerState state = golem.farmerState();
             return state == FarmerState.MOVING_TO_COMBAT || state == FarmerState.COMBATING;
+        }
+        if (golem.data().type() == GolemType.DIGGER) {
+            DiggerState state = golem.diggerState();
+            return state == DiggerState.MOVING_TO_COMBAT || state == DiggerState.COMBATING;
         }
         MinerState state = golem.state();
         return state == MinerState.MOVING_TO_COMBAT || state == MinerState.COMBATING;
@@ -224,6 +229,8 @@ public final class GolemCombatWork {
     private void resumeWork(ActiveGolem golem) {
         if (golem.data().type() == GolemType.FARMER) {
             golem.farmerState(FarmerState.WAITING_SEEDS);
+        } else if (golem.data().type() == GolemType.DIGGER) {
+            golem.diggerState(DiggerState.IDLE);
         } else {
             golem.state(MinerState.IDLE);
         }
@@ -233,6 +240,8 @@ public final class GolemCombatWork {
     private void setMovingToChest(ActiveGolem golem) {
         if (golem.data().type() == GolemType.FARMER) {
             golem.farmerState(FarmerState.MOVING_TO_CHEST);
+        } else if (golem.data().type() == GolemType.DIGGER) {
+            golem.diggerState(DiggerState.MOVING_TO_CHEST);
         } else {
             golem.state(MinerState.MOVING_TO_CHEST);
         }
@@ -241,6 +250,8 @@ public final class GolemCombatWork {
     private void setMovingCombat(ActiveGolem golem) {
         if (golem.data().type() == GolemType.FARMER) {
             golem.farmerState(FarmerState.MOVING_TO_COMBAT);
+        } else if (golem.data().type() == GolemType.DIGGER) {
+            golem.diggerState(DiggerState.MOVING_TO_COMBAT);
         } else {
             golem.state(MinerState.MOVING_TO_COMBAT);
         }
@@ -250,6 +261,8 @@ public final class GolemCombatWork {
         if (GolemMovement.horizontalDistanceSquared(copper.getLocation(), target.getLocation()) <= REACH_SQ) {
             if (golem.data().type() == GolemType.FARMER) {
                 golem.farmerState(FarmerState.COMBATING);
+            } else if (golem.data().type() == GolemType.DIGGER) {
+                golem.diggerState(DiggerState.COMBATING);
             } else {
                 golem.state(MinerState.COMBATING);
             }
@@ -259,7 +272,7 @@ public final class GolemCombatWork {
     }
 
     private void tryAttack(ActiveGolem golem, CopperGolem copper, LivingEntity target, Material weapon) {
-        Settings.Combat combat = this.settings.get().combat;
+        GolemSettings.Combat combat = this.settings.get().combat;
         long now = System.currentTimeMillis();
         if (now - golem.lastCombatAttackAt() < Math.max(200L, combat.attackCooldownMs)) {
             return;
@@ -269,7 +282,7 @@ public final class GolemCombatWork {
         target.damage(damageFor(weapon, combat), copper);
     }
 
-    private static double damageFor(Material weapon, Settings.Combat combat) {
+    private static double damageFor(Material weapon, GolemSettings.Combat combat) {
         String name = weapon.name();
         double base = combat.damageWood;
         if (name.startsWith("NETHERITE_")) {

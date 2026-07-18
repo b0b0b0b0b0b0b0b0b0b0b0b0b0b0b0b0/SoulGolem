@@ -1,6 +1,6 @@
 package bm.b0b0b0.SoulGolem.service.farmer;
 
-import bm.b0b0b0.SoulGolem.config.settings.Settings;
+import bm.b0b0b0.SoulGolem.config.settings.GolemSettings;
 import bm.b0b0b0.SoulGolem.model.ActiveGolem;
 import bm.b0b0b0.SoulGolem.model.CropType;
 import bm.b0b0b0.SoulGolem.model.FarmerState;
@@ -49,7 +49,7 @@ public final class FarmerCompostWork {
     }
 
     public boolean needsPlaceComposter(ActiveGolem golem) {
-        Settings.Farmer farmer = this.ctx.settings().farmer;
+        GolemSettings.Farmer farmer = this.ctx.settings().farmer;
         if (!farmer.useComposter || hasValidComposter(golem.data())) {
             return false;
         }
@@ -58,7 +58,7 @@ public final class FarmerCompostWork {
     }
 
     public boolean hasFillWork(ActiveGolem golem) {
-        Settings.Farmer farmer = this.ctx.settings().farmer;
+        GolemSettings.Farmer farmer = this.ctx.settings().farmer;
         if (!farmer.useComposter || !hasValidComposter(golem.data()) || isCompostReady(golem.data())) {
             return false;
         }
@@ -66,7 +66,7 @@ public final class FarmerCompostWork {
     }
 
     public boolean tryStartCollect(ActiveGolem golem) {
-        Settings.Farmer farmer = this.ctx.settings().farmer;
+        GolemSettings.Farmer farmer = this.ctx.settings().farmer;
         if (!farmer.useComposter || !hasValidComposter(golem.data()) || !isCompostReady(golem.data())) {
             return false;
         }
@@ -145,7 +145,7 @@ public final class FarmerCompostWork {
 
     public void takeCompostFillFromChest(ActiveGolem golem) {
         golem.clearFetchFlags();
-        Settings.Farmer farmer = this.ctx.settings().farmer;
+        GolemSettings.Farmer farmer = this.ctx.settings().farmer;
         int want = Math.max(1, farmer.compostItemsPerTrip);
         int taken = 0;
         taken += takeExcessSeeds(golem, want - taken);
@@ -308,7 +308,7 @@ public final class FarmerCompostWork {
     }
 
     public boolean shouldCompostCrops(ActiveGolem golem) {
-        Settings.Farmer farmer = this.ctx.settings().farmer;
+        GolemSettings.Farmer farmer = this.ctx.settings().farmer;
         if (!farmer.useBoneMeal || !this.ctx.hasBoneMealWork(golem)) {
             return false;
         }
@@ -316,7 +316,7 @@ public final class FarmerCompostWork {
     }
 
     private int excessSeedCount(ActiveGolem golem) {
-        Settings.Farmer farmer = this.ctx.settings().farmer;
+        GolemSettings.Farmer farmer = this.ctx.settings().farmer;
         int reserve = Math.max(0, farmer.compostSeedReserve);
         if (this.ctx.hasOpenPlantSpots(golem.data())) {
             reserve = Math.max(reserve, Math.max(1, farmer.seedsPerTrip));
@@ -333,7 +333,7 @@ public final class FarmerCompostWork {
         if (!shouldCompostCrops(golem)) {
             return 0;
         }
-        Settings.Farmer farmer = this.ctx.settings().farmer;
+        GolemSettings.Farmer farmer = this.ctx.settings().farmer;
         int keep = Math.max(0, farmer.compostCropKeep);
         int total = 0;
         for (CropType type : this.ctx.enabledCrops()) {
@@ -356,7 +356,7 @@ public final class FarmerCompostWork {
         if (max <= 0) {
             return 0;
         }
-        Settings.Farmer farmer = this.ctx.settings().farmer;
+        GolemSettings.Farmer farmer = this.ctx.settings().farmer;
         int reserve = Math.max(0, farmer.compostSeedReserve);
         if (this.ctx.hasOpenPlantSpots(golem.data())) {
             reserve = Math.max(reserve, Math.max(1, farmer.seedsPerTrip));
@@ -384,7 +384,7 @@ public final class FarmerCompostWork {
         if (max <= 0 || !shouldCompostCrops(golem)) {
             return 0;
         }
-        Settings.Farmer farmer = this.ctx.settings().farmer;
+        GolemSettings.Farmer farmer = this.ctx.settings().farmer;
         int keep = Math.max(0, farmer.compostCropKeep);
         int taken = 0;
         for (CropType type : this.ctx.enabledCrops()) {

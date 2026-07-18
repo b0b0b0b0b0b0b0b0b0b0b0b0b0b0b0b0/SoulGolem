@@ -1,6 +1,7 @@
 package bm.b0b0b0.SoulGolem.service;
 
 import bm.b0b0b0.SoulGolem.model.ActiveGolem;
+import bm.b0b0b0.SoulGolem.model.DiggerState;
 import bm.b0b0b0.SoulGolem.model.FarmerState;
 import bm.b0b0b0.SoulGolem.model.GolemType;
 import bm.b0b0b0.SoulGolem.model.MinerState;
@@ -140,6 +141,9 @@ public final class GolemGazeService {
     private static boolean isSitting(ActiveGolem golem) {
         if (golem.data().type() == GolemType.FARMER) {
             return golem.farmerState() == FarmerState.SITTING;
+        }
+        if (golem.data().type() == GolemType.DIGGER) {
+            return golem.diggerState() == DiggerState.SITTING;
         }
         return golem.state() == MinerState.SITTING;
     }

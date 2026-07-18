@@ -23,6 +23,7 @@ public final class GuiListSettings extends YamlSerializable {
     public String fillerMaterial = "GRAY_STAINED_GLASS_PANE";
     public String minerMaterial = "IRON_PICKAXE";
     public String farmerMaterial = "WHEAT";
+    public String diggerMaterial = "IRON_SHOVEL";
     public String prevMaterial = "ARROW";
     public String nextMaterial = "ARROW";
 

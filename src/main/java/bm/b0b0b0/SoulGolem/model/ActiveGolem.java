@@ -12,10 +12,12 @@ public final class ActiveGolem {
     private final SoulGolemData data;
     private MinerState state = MinerState.IDLE;
     private FarmerState farmerState = FarmerState.WAITING_SEEDS;
+    private DiggerState diggerState = DiggerState.IDLE;
     private Location targetOre;
     private Location targetCrop;
     private Material oreMaterial;
     private long mineTicksLeft;
+    private long workBoostUntilMs;
     private long restTicksLeft;
     private long fenceStuckTicks;
     private double fenceCheckX = Double.NaN;
@@ -51,6 +53,7 @@ public final class ActiveGolem {
     private boolean pauseAfterRest;
     private boolean resumeSeatRest;
     private boolean chestFullNotified;
+    private boolean crewReturning;
     private boolean setupComplete;
     private SetupPhase setupPhase = SetupPhase.CLEAR;
     private final List<Location> setupQueue = new ArrayList<>();
@@ -80,6 +83,14 @@ public final class ActiveGolem {
 
     public void farmerState(FarmerState farmerState) {
         this.farmerState = farmerState;
+    }
+
+    public DiggerState diggerState() {
+        return this.diggerState;
+    }
+
+    public void diggerState(DiggerState diggerState) {
+        this.diggerState = diggerState;
     }
 
     public Location targetOre() {
@@ -112,6 +123,18 @@ public final class ActiveGolem {
 
     public void mineTicksLeft(long mineTicksLeft) {
         this.mineTicksLeft = mineTicksLeft;
+    }
+
+    public long workBoostUntilMs() {
+        return this.workBoostUntilMs;
+    }
+
+    public void workBoostUntilMs(long workBoostUntilMs) {
+        this.workBoostUntilMs = workBoostUntilMs;
+    }
+
+    public boolean workBoostActive() {
+        return this.workBoostUntilMs > System.currentTimeMillis();
     }
 
     public long restTicksLeft() {
@@ -461,6 +484,14 @@ public final class ActiveGolem {
 
     public void chestFullNotified(boolean chestFullNotified) {
         this.chestFullNotified = chestFullNotified;
+    }
+
+    public boolean crewReturning() {
+        return this.crewReturning;
+    }
+
+    public void crewReturning(boolean crewReturning) {
+        this.crewReturning = crewReturning;
     }
 
     public boolean setupComplete() {

@@ -130,7 +130,11 @@ public final class GolemGuiService {
     }
 
     public TagResolver[] golemResolvers(ActiveGolem golem) {
-        String typeLabel = golem.data().type() == GolemType.FARMER ? "farmer" : "miner";
+        String typeLabel = switch (golem.data().type()) {
+            case FARMER -> "farmer";
+            case DIGGER -> "digger";
+            default -> "miner";
+        };
         return new TagResolver[] {
                 MessageService.stub("type", golem.data().type().name()),
                 MessageService.stub("type_label", typeLabel),
@@ -145,15 +149,42 @@ public final class GolemGuiService {
     }
 
     public net.kyori.adventure.text.Component statusComponent(ActiveGolem golem) {
-        return messages().component(GolemDisplay.statusKey(golem), MessageService.stub("time", ""));
+        String time = "";
+        if (golem.data().type() == GolemType.DIGGER) {
+            time = switch (golem.diggerState()) {
+                case RESTING, SITTING, MOVING_TO_SEAT -> formatRest(golem.restTicksLeft());
+                default -> "";
+            };
+        } else if (golem.data().type() == GolemType.MINER) {
+            time = switch (golem.state()) {
+                case RESTING, SITTING, MOVING_TO_SEAT -> formatRest(golem.restTicksLeft());
+                default -> "";
+            };
+        }
+        return messages().component(GolemDisplay.statusKey(golem), MessageService.stub("time", time));
+    }
+
+    private static String formatRest(long ticks) {
+        long seconds = Math.max(0L, (ticks + 19L) / 20L);
+        long minutes = seconds / 60L;
+        long rem = seconds % 60L;
+        return minutes + ":" + (rem < 10L ? "0" : "") + rem;
     }
 
     public String golemNameKey(ActiveGolem golem) {
-        return golem.data().type() == GolemType.FARMER ? "golem-name-farmer" : "golem-name-miner";
+        return switch (golem.data().type()) {
+            case FARMER -> "golem-name-farmer";
+            case DIGGER -> "golem-name-digger";
+            default -> "golem-name-miner";
+        };
     }
 
     public String golemIconMaterial(ActiveGolem golem, GuiListSettings settings) {
-        return golem.data().type() == GolemType.FARMER ? settings.farmerMaterial : settings.minerMaterial;
+        return switch (golem.data().type()) {
+            case FARMER -> settings.farmerMaterial;
+            case DIGGER -> settings.diggerMaterial;
+            default -> settings.minerMaterial;
+        };
     }
 
     private bm.b0b0b0.SoulGolem.config.settings.Settings.Permissions permissions() {

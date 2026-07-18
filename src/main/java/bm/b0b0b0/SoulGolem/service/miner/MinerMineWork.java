@@ -1,6 +1,6 @@
 package bm.b0b0b0.SoulGolem.service.miner;
 
-import bm.b0b0b0.SoulGolem.config.settings.Settings;
+import bm.b0b0b0.SoulGolem.config.settings.GolemSettings;
 import bm.b0b0b0.SoulGolem.model.ActiveGolem;
 import bm.b0b0b0.SoulGolem.model.MinerState;
 import bm.b0b0b0.SoulGolem.service.GolemGaze;
@@ -54,7 +54,7 @@ public final class MinerMineWork {
             return;
         }
 
-        if (this.ctx.settings().miner.collectGroundLoot) {
+        if (this.ctx.settings().yard.collectGroundLoot) {
             GolemGroundLootWork.Phase loot = this.ctx.groundLoot().tick(golem, copper, true);
             if (loot == GolemGroundLootWork.Phase.MOVING) {
                 golem.state(MinerState.SEEKING);
@@ -73,8 +73,8 @@ public final class MinerMineWork {
         }
 
         int radius = this.ctx.chestService().effectiveRadius(golem.data());
-        Settings.Miner miner = this.ctx.settings().miner;
-        if (miner.clearArea) {
+        GolemSettings.Yard yard = this.ctx.settings().yard;
+        if (yard.clearBorder) {
             List<Block> junk = this.ctx.farmAreaService().minerJunkToClear(golem.data(), radius, this.ctx.oreTable());
             if (!junk.isEmpty()) {
                 golem.clearFetchFlags();
@@ -84,18 +84,18 @@ public final class MinerMineWork {
             }
         }
         Material torch = this.ctx.resolveTorch();
-        if (miner.placeTorches
+        if (yard.placeTorches
                 && this.ctx.chestService().countItem(golem.data(), torch) > 0
-                && !this.ctx.farmAreaService().perimeterTorchSpots(golem.data(), radius, miner.maxTorches).isEmpty()) {
+                && !this.ctx.farmAreaService().perimeterTorchSpots(golem.data(), radius, yard.maxTorches).isEmpty()) {
             golem.clearFetchFlags();
             golem.fetchingTorch(true);
             golem.state(MinerState.MOVING_TO_CHEST);
             return;
         }
-        if (this.support.tryStartFenceJob(golem, radius, miner)) {
+        if (this.support.tryStartFenceJob(golem, radius)) {
             return;
         }
-        if (this.support.tryStartSeatJob(golem, radius, miner)) {
+        if (this.support.tryStartSeatJob(golem, radius)) {
             return;
         }
 
@@ -148,7 +148,8 @@ public final class MinerMineWork {
         copper.setVelocity(new Vector(0, 0, 0));
         golem.state(MinerState.MINING);
         GolemGaze.faceBlock(golem, block);
-        golem.mineTicksLeft(Math.max(1L, this.ctx.settings().mineDurationTicks));
+        golem.mineTicksLeft(Math.max(1L, (long) (this.ctx.settings().mineDurationTicks
+                / this.ctx.stickBoostFactor(golem))));
         this.ctx.playMineFx(block);
     }
 
@@ -164,7 +165,8 @@ public final class MinerMineWork {
             golem.state(MinerState.IDLE);
             return;
         }
-        long left = golem.mineTicksLeft() - this.ctx.settings().coordinatorPeriodTicks;
+        long step = Math.max(1L, (long) (this.ctx.settings().coordinatorPeriodTicks * this.ctx.stickBoostFactor(golem)));
+        long left = golem.mineTicksLeft() - step;
         golem.mineTicksLeft(left);
         if (left > 0L) {
             GolemGaze.faceBlock(golem, block);
@@ -215,10 +217,11 @@ public final class MinerMineWork {
 
         golem.blocksLeftThisTrip(0);
         golem.state(MinerState.MOVING_TO_CHEST);
-
-        Location chestStand = this.ctx.chestService().chestStandLocation(golem.data());
-        if (chestStand != null) {
-            this.ctx.walkTowards(copper, chestStand, golem.data());
+        if (!this.ctx.chestLink().isLinked(golem.data())) {
+            Location chestStand = this.ctx.chestService().chestStandLocation(golem.data());
+            if (chestStand != null) {
+                this.ctx.walkTowards(copper, chestStand, golem.data());
+            }
         }
     }
 

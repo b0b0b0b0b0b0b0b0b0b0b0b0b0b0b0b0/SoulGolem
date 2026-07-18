@@ -18,6 +18,7 @@ import bm.b0b0b0.SoulGolem.service.GolemLifecycleService;
 import bm.b0b0b0.SoulGolem.gui.GolemGuiService;
 import bm.b0b0b0.SoulGolem.service.GolemRegistry;
 import bm.b0b0b0.SoulGolem.service.GolemSpawnService;
+import bm.b0b0b0.SoulGolem.service.DiggerTickService;
 import bm.b0b0b0.SoulGolem.service.MinerTickService;
 import bm.b0b0b0.SoulGolem.service.OreTableService;
 import bm.b0b0b0.SoulGolem.service.SoulChestService;
@@ -52,7 +53,7 @@ public final class SoulGolem extends JavaPlugin {
         this.statueRecipes = new StatueRecipeService(
                 this,
                 statueFactory,
-                () -> this.configurationLoader.config().settings()
+                () -> this.configurationLoader.config().golems()
         );
         this.statueRecipes.register();
         GolemRegistry registry = new GolemRegistry();
@@ -129,13 +130,26 @@ public final class SoulGolem extends JavaPlugin {
                 spawnService
         );
 
+        DiggerTickService diggerTickService = new DiggerTickService(
+                this,
+                this.configurationLoader,
+                keys,
+                registry,
+                chestService,
+                this.workAreaService,
+                farmAreaService,
+                repository,
+                spawnService
+        );
+
         this.lifecycleService = new GolemLifecycleService(
                 this,
                 repository,
                 spawnService,
                 registry,
                 minerTickService,
-                farmerTickService
+                farmerTickService,
+                diggerTickService
         );
 
         GolemControlService controlService = new GolemControlService(
@@ -162,7 +176,8 @@ public final class SoulGolem extends JavaPlugin {
                 this.workAreaService,
                 farmAreaService,
                 registry,
-                repository
+                repository,
+                guiService
         ), this);
         getServer().getPluginManager().registerEvents(new GolemGuiListener(), this);
 

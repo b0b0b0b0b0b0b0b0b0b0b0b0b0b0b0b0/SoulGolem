@@ -35,6 +35,10 @@ public final class SoulGolemData {
     private long blocksMined;
     private String upgradesJson;
     private long lastActionAt;
+    private int digStartY = Integer.MIN_VALUE;
+    private int digLayerY = Integer.MIN_VALUE;
+    private int digStairIndex;
+    private UUID crewLeaderId;
 
     public SoulGolemData(UUID id) {
         this.id = id;
@@ -45,6 +49,10 @@ public final class SoulGolemData {
         this.blocksMined = 0L;
         this.upgradesJson = "{}";
         this.lastActionAt = 0L;
+        this.digStartY = Integer.MIN_VALUE;
+        this.digLayerY = Integer.MIN_VALUE;
+        this.digStairIndex = 0;
+        this.crewLeaderId = null;
     }
 
     public UUID id() {
@@ -284,5 +292,45 @@ public final class SoulGolemData {
 
     public void lastActionAt(long lastActionAt) {
         this.lastActionAt = lastActionAt;
+    }
+
+    public int digStartY() {
+        return this.digStartY;
+    }
+
+    public void digStartY(int digStartY) {
+        this.digStartY = digStartY;
+    }
+
+    public int digLayerY() {
+        return this.digLayerY;
+    }
+
+    public void digLayerY(int digLayerY) {
+        this.digLayerY = digLayerY;
+    }
+
+    public int digStairIndex() {
+        return this.digStairIndex;
+    }
+
+    public void digStairIndex(int digStairIndex) {
+        this.digStairIndex = digStairIndex;
+    }
+
+    public boolean hasDigProgress() {
+        return this.digStartY != Integer.MIN_VALUE;
+    }
+
+    public UUID crewLeaderId() {
+        return this.crewLeaderId;
+    }
+
+    public void crewLeaderId(UUID crewLeaderId) {
+        this.crewLeaderId = crewLeaderId;
+    }
+
+    public boolean isCrewHelper() {
+        return this.crewLeaderId != null;
     }
 }

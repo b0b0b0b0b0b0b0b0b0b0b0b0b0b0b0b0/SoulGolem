@@ -2,7 +2,8 @@ package bm.b0b0b0.SoulGolem.model;
 
 public enum GolemType {
     MINER,
-    FARMER;
+    FARMER,
+    DIGGER;
 
     public static GolemType fromString(String raw) {
         if (raw == null || raw.isBlank()) {

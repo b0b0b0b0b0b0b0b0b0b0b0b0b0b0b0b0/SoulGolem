@@ -1,6 +1,6 @@
 package bm.b0b0b0.SoulGolem.service.miner;
 
-import bm.b0b0b0.SoulGolem.config.settings.Settings;
+import bm.b0b0b0.SoulGolem.config.settings.GolemSettings;
 import bm.b0b0b0.SoulGolem.model.ActiveGolem;
 import bm.b0b0b0.SoulGolem.model.SoulGolemData;
 import bm.b0b0b0.SoulGolem.model.MinerState;
@@ -62,7 +62,7 @@ public final class MinerPickaxeWork {
         if (isUpgradePickaxe(upgrade)) {
             return upgrade;
         }
-        Settings settings = this.ctx.settings();
+        GolemSettings settings = this.ctx.settings();
         Material copper = Material.matchMaterial(settings.pickaxeMaterial);
         if (copper != null) {
             return copper;

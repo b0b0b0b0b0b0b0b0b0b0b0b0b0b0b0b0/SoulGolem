@@ -1,6 +1,6 @@
 package bm.b0b0b0.SoulGolem.item;
 
-import bm.b0b0b0.SoulGolem.config.settings.Settings;
+import bm.b0b0b0.SoulGolem.config.settings.GolemSettings;
 import bm.b0b0b0.SoulGolem.model.GolemType;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -21,27 +21,25 @@ public final class StatueRecipeService {
 
     private final Plugin plugin;
     private final StatueItemFactory statueFactory;
-    private final Supplier<Settings> settings;
+    private final Supplier<GolemSettings> golems;
     private final List<NamespacedKey> registered = new ArrayList<>(2);
 
     public StatueRecipeService(
             Plugin plugin,
             StatueItemFactory statueFactory,
-            Supplier<Settings> settings
+            Supplier<GolemSettings> golems
     ) {
         this.plugin = plugin;
         this.statueFactory = statueFactory;
-        this.settings = settings;
+        this.golems = golems;
     }
 
     public void register() {
         unregister();
-        Settings.Crafting crafting = this.settings.get().crafting;
-        if (crafting == null || !crafting.enabled) {
-            return;
-        }
-        registerOne("farmer_statue", GolemType.FARMER, crafting.farmer);
-        registerOne("miner_statue", GolemType.MINER, crafting.miner);
+        GolemSettings settings = this.golems.get();
+        registerOne("farmer_statue", GolemType.FARMER, settings.farmer.craft);
+        registerOne("miner_statue", GolemType.MINER, settings.miner.craft);
+        registerOne("digger_statue", GolemType.DIGGER, settings.digger.craft);
     }
 
     public void unregister() {
@@ -51,7 +49,7 @@ public final class StatueRecipeService {
         this.registered.clear();
     }
 
-    private void registerOne(String id, GolemType type, Settings.StatueCraft craft) {
+    private void registerOne(String id, GolemType type, GolemSettings.StatueCraft craft) {
         if (craft == null || !craft.enabled) {
             return;
         }

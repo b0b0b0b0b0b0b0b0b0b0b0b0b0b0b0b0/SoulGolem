@@ -3,7 +3,10 @@ package bm.b0b0b0.SoulGolem.database;
 import bm.b0b0b0.SoulGolem.config.settings.Settings;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
@@ -44,7 +47,7 @@ public final class DatabaseManager {
                 hikari.setPassword(database.mysqlPassword);
                 hikari.setDriverClassName("com.mysql.cj.jdbc.Driver");
             } else {
-                Path dbFile = dataFolder.resolve(database.sqliteFile);
+                Path dbFile = resolveSqliteFile(dataFolder, database.sqliteFile);
                 hikari.setJdbcUrl("jdbc:sqlite:" + dbFile.toAbsolutePath());
                 hikari.setDriverClassName("org.sqlite.JDBC");
                 hikari.setMaximumPoolSize(1);
@@ -53,6 +56,24 @@ public final class DatabaseManager {
             this.dataSource = new HikariDataSource(hikari);
             migrate();
         }, this.executor);
+    }
+
+    private static Path resolveSqliteFile(Path dataFolder, String sqliteFile) {
+        String relative = sqliteFile == null || sqliteFile.isBlank() ? "db/data.db" : sqliteFile;
+        Path dbFile = dataFolder.resolve(relative).normalize();
+        try {
+            Path parent = dbFile.getParent();
+            if (parent != null) {
+                Files.createDirectories(parent);
+            }
+            Path legacy = dataFolder.resolve("data.db");
+            if (Files.exists(legacy) && !Files.exists(dbFile) && !legacy.equals(dbFile)) {
+                Files.move(legacy, dbFile, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } catch (IOException exception) {
+            throw new IllegalStateException("Failed to prepare SQLite file " + dbFile, exception);
+        }
+        return dbFile;
     }
 
     private void migrate() {
@@ -83,6 +104,10 @@ public final class DatabaseManager {
                         compost_x DOUBLE NOT NULL DEFAULT -1,
                         compost_y DOUBLE NOT NULL DEFAULT -1,
                         compost_z DOUBLE NOT NULL DEFAULT -1,
+                        dig_start_y INT NOT NULL DEFAULT -2147483648,
+                        dig_layer_y INT NOT NULL DEFAULT -2147483648,
+                        dig_stair_index INT NOT NULL DEFAULT 0,
+                        crew_leader_id VARCHAR(36),
                         entity_uuid VARCHAR(36),
                         level INT NOT NULL,
                         energy INT NOT NULL,
@@ -107,6 +132,10 @@ public final class DatabaseManager {
             addColumnIgnoreError(statement, "ALTER TABLE soul_golems ADD COLUMN compost_x DOUBLE NOT NULL DEFAULT -1");
             addColumnIgnoreError(statement, "ALTER TABLE soul_golems ADD COLUMN compost_y DOUBLE NOT NULL DEFAULT -1");
             addColumnIgnoreError(statement, "ALTER TABLE soul_golems ADD COLUMN compost_z DOUBLE NOT NULL DEFAULT -1");
+            addColumnIgnoreError(statement, "ALTER TABLE soul_golems ADD COLUMN dig_start_y INT NOT NULL DEFAULT -2147483648");
+            addColumnIgnoreError(statement, "ALTER TABLE soul_golems ADD COLUMN dig_layer_y INT NOT NULL DEFAULT -2147483648");
+            addColumnIgnoreError(statement, "ALTER TABLE soul_golems ADD COLUMN dig_stair_index INT NOT NULL DEFAULT 0");
+            addColumnIgnoreError(statement, "ALTER TABLE soul_golems ADD COLUMN crew_leader_id VARCHAR(36)");
         } catch (SQLException exception) {
             throw new IllegalStateException("Failed to migrate SoulGolem database", exception);
         }

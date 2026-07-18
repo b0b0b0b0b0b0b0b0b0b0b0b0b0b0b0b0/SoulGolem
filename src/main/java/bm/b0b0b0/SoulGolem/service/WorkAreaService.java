@@ -1,7 +1,7 @@
 package bm.b0b0b0.SoulGolem.service;
 
 import bm.b0b0b0.SoulGolem.config.ConfigurationLoader;
-import bm.b0b0b0.SoulGolem.config.settings.Settings;
+import bm.b0b0b0.SoulGolem.config.settings.GolemSettings;
 import bm.b0b0b0.SoulGolem.model.SoulGolemData;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -29,8 +29,8 @@ public final class WorkAreaService {
         this.configurationLoader = configurationLoader;
     }
 
-    private Settings settings() {
-        return this.configurationLoader.config().settings();
+    private GolemSettings settings() {
+        return this.configurationLoader.config().golems();
     }
 
     public void setupArea(SoulGolemData data, int radius) {
@@ -181,6 +181,7 @@ public final class WorkAreaService {
     }
 
     private void placeBorderFloorExact(World world, int x, int homeY, int z, Material border, UUID golemId) {
+        clearFoliageColumn(world, x, homeY, z);
         Block atHome = world.getBlockAt(x, homeY, z);
         Block aboveHome = world.getBlockAt(x, homeY + 1, z);
         if (SoulChestService.isChestLike(atHome.getType()) || atHome.getType() == Material.CRAFTING_TABLE || atHome.getType() == Material.COMPOSTER) {
@@ -192,19 +193,14 @@ public final class WorkAreaService {
             return;
         }
         if (atHome.getType() == border) {
+            ensureSupportUnder(atHome, border, golemId);
             return;
-        }
-        if (FarmAreaService.isVegetation(aboveHome.getType()) || aboveHome.getType() == Material.SNOW) {
-            aboveHome.setType(Material.AIR, false);
-        }
-        Block upper = world.getBlockAt(x, homeY + 2, z);
-        if (FarmAreaService.isVegetation(upper.getType()) || upper.getType() == Material.SNOW) {
-            upper.setType(Material.AIR, false);
         }
         BlockPos pos = BlockPos.of(atHome);
         this.originals.putIfAbsent(pos, atHome.getType());
         atHome.setType(border, false);
         protect(atHome, golemId);
+        ensureSupportUnder(atHome, border, golemId);
     }
 
     public List<Location> borderFloorSlots(SoulGolemData data, int radius) {
@@ -249,6 +245,7 @@ public final class WorkAreaService {
     }
 
     private void placeBorderFloor(World world, int x, int homeY, int z, Material border, UUID golemId) {
+        clearFoliageColumn(world, x, homeY, z);
         Block atHome = world.getBlockAt(x, homeY, z);
         Block aboveHome = world.getBlockAt(x, homeY + 1, z);
         if (SoulChestService.isChestLike(atHome.getType()) || atHome.getType() == Material.CRAFTING_TABLE || atHome.getType() == Material.COMPOSTER) {
@@ -265,15 +262,24 @@ public final class WorkAreaService {
             }
             return;
         }
+        if (FarmAreaService.isFoliage(atHome.getType())
+                || atHome.getType().isAir()
+                || !atHome.getType().isSolid()
+                || atHome.getType() == Material.SNOW) {
+            BlockPos pos = BlockPos.of(atHome);
+            this.originals.putIfAbsent(pos, atHome.getType());
+            atHome.setType(border, false);
+            protect(atHome, golemId);
+            ensureSupportUnder(atHome, border, golemId);
+            return;
+        }
         Block ground = findTerrainGround(world, x, homeY, z);
-        if (ground == null) {
-            ground = world.getBlockAt(x, homeY, z);
-            if (ground.getType().isAir() || !ground.getType().isSolid()) {
-                BlockPos pos = BlockPos.of(ground);
-                this.originals.putIfAbsent(pos, ground.getType());
-                ground.setType(border, false);
-                protect(ground, golemId);
-            }
+        if (ground == null || ground.getY() < homeY - 2) {
+            BlockPos pos = BlockPos.of(atHome);
+            this.originals.putIfAbsent(pos, atHome.getType());
+            atHome.setType(border, false);
+            protect(atHome, golemId);
+            ensureSupportUnder(atHome, border, golemId);
             return;
         }
         if (SoulChestService.isChestLike(ground.getType()) || ground.getType() == Material.CRAFTING_TABLE || ground.getType() == Material.COMPOSTER) {
@@ -285,10 +291,10 @@ public final class WorkAreaService {
             ensureSupportUnder(above, border, golemId);
             return;
         }
-        if (FarmAreaService.isVegetation(above.getType())) {
+        if (FarmAreaService.isVegetation(above.getType()) || above.getType() == Material.SNOW) {
             above.setType(Material.AIR, false);
             Block upper = above.getRelative(0, 1, 0);
-            if (FarmAreaService.isVegetation(upper.getType())) {
+            if (FarmAreaService.isVegetation(upper.getType()) || upper.getType() == Material.SNOW) {
                 upper.setType(Material.AIR, false);
             }
         }
@@ -296,6 +302,17 @@ public final class WorkAreaService {
         this.originals.putIfAbsent(pos, ground.getType());
         ground.setType(border, false);
         protect(ground, golemId);
+    }
+
+    private static void clearFoliageColumn(World world, int x, int homeY, int z) {
+        for (int y = homeY + 3; y >= homeY - 2; y--) {
+            Block block = world.getBlockAt(x, y, z);
+            if (FarmAreaService.isFoliage(block.getType())
+                    || FarmAreaService.isVegetation(block.getType())
+                    || block.getType() == Material.SNOW) {
+                block.setType(Material.AIR, false);
+            }
+        }
     }
 
     private void ensureSupportUnder(Block station, Material border, UUID golemId) {

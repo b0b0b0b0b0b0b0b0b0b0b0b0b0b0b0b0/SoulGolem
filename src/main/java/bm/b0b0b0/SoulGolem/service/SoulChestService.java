@@ -1,7 +1,8 @@
 package bm.b0b0b0.SoulGolem.service;
 
 import bm.b0b0b0.SoulGolem.config.PluginConfig;
-import bm.b0b0b0.SoulGolem.config.settings.Settings;
+import bm.b0b0b0.SoulGolem.config.settings.GolemSettings;
+import bm.b0b0b0.SoulGolem.model.GolemType;
 import bm.b0b0b0.SoulGolem.model.SoulGolemData;
 import bm.b0b0b0.SoulGolem.util.PluginKeys;
 import java.util.ArrayList;
@@ -526,7 +527,7 @@ public final class SoulChestService {
                 && type != Material.SNOW) {
             return;
         }
-        Material fill = Material.matchMaterial(this.config.settings().borderMaterial);
+        Material fill = Material.matchMaterial(this.config.golems().borderMaterial);
         if (fill == null || !fill.isBlock() || !fill.isSolid()) {
             fill = Material.DIRT;
         }
@@ -546,7 +547,7 @@ public final class SoulChestService {
     }
 
     private void spawnOrRefreshHologram(Block block, UUID golemId, Component name) {
-        Settings.TextDisplays style = this.config.settings().visuals.textDisplays;
+        GolemSettings.TextDisplays style = this.config.golems().visuals.textDisplays;
         if (!style.enabled) {
             return;
         }
@@ -580,7 +581,7 @@ public final class SoulChestService {
         if (world == null) {
             return;
         }
-        float offsetY = this.config.settings().visuals.textDisplays.chestOffsetY;
+        float offsetY = this.config.golems().visuals.textDisplays.chestOffsetY;
         Location at = new Location(world, data.chestX() + 0.5D, data.chestY() + offsetY, data.chestZ() + 0.5D);
         removeDisplaysAt(at, this.keys.chestGolemId(), data.id().toString(), 1.5D);
     }
@@ -590,7 +591,7 @@ public final class SoulChestService {
         if (world == null || !data.hasCraftStation()) {
             return;
         }
-        float offsetY = this.config.settings().visuals.textDisplays.chestOffsetY;
+        float offsetY = this.config.golems().visuals.textDisplays.chestOffsetY;
         Location at = new Location(
                 world,
                 Math.floor(data.craftX()) + 0.5D,
@@ -619,7 +620,7 @@ public final class SoulChestService {
     }
 
     private void spawnOrRefreshCraftHologram(Block block, UUID golemId) {
-        Settings.TextDisplays style = this.config.settings().visuals.textDisplays;
+        GolemSettings.TextDisplays style = this.config.golems().visuals.textDisplays;
         if (!style.enabled) {
             return;
         }
@@ -646,7 +647,7 @@ public final class SoulChestService {
     }
 
     private void spawnOrRefreshCompostHologram(Block block, UUID golemId) {
-        Settings.TextDisplays style = this.config.settings().visuals.textDisplays;
+        GolemSettings.TextDisplays style = this.config.golems().visuals.textDisplays;
         if (!style.enabled) {
             return;
         }
@@ -675,7 +676,7 @@ public final class SoulChestService {
         if (world == null || !data.hasCompostStation()) {
             return;
         }
-        float offsetY = this.config.settings().visuals.textDisplays.chestOffsetY;
+        float offsetY = this.config.golems().visuals.textDisplays.chestOffsetY;
         Location at = new Location(
                 world,
                 Math.floor(data.compostX()) + 0.5D,
@@ -739,7 +740,7 @@ public final class SoulChestService {
     }
 
     private boolean craftHologramMatches(Block block, UUID golemId) {
-        Settings.TextDisplays style = this.config.settings().visuals.textDisplays;
+        GolemSettings.TextDisplays style = this.config.golems().visuals.textDisplays;
         Location at = block.getLocation().add(0.5D, style.chestOffsetY, 0.5D);
         for (org.bukkit.entity.Entity nearby : block.getWorld().getNearbyEntities(at, 0.8D, 0.8D, 0.8D)) {
             if (!(nearby instanceof TextDisplay display)) {
@@ -1002,7 +1003,7 @@ public final class SoulChestService {
         if (block.getType() != Material.CRAFTING_TABLE) {
             return null;
         }
-        Settings.TextDisplays style = this.config.settings().visuals.textDisplays;
+        GolemSettings.TextDisplays style = this.config.golems().visuals.textDisplays;
         Location at = block.getLocation().add(0.5D, style.chestOffsetY, 0.5D);
         for (org.bukkit.entity.Entity nearby : block.getWorld().getNearbyEntities(at, 0.8D, 0.8D, 0.8D)) {
             if (!(nearby instanceof TextDisplay display)) {
@@ -1036,7 +1037,7 @@ public final class SoulChestService {
         if (block.getType() != Material.COMPOSTER) {
             return null;
         }
-        Settings.TextDisplays style = this.config.settings().visuals.textDisplays;
+        GolemSettings.TextDisplays style = this.config.golems().visuals.textDisplays;
         Location at = block.getLocation().add(0.5D, style.chestOffsetY, 0.5D);
         for (org.bukkit.entity.Entity nearby : block.getWorld().getNearbyEntities(at, 0.8D, 0.8D, 0.8D)) {
             if (!(nearby instanceof TextDisplay display)) {
@@ -1051,7 +1052,7 @@ public final class SoulChestService {
     }
 
     private boolean compostHologramMatches(Block block, UUID golemId) {
-        Settings.TextDisplays style = this.config.settings().visuals.textDisplays;
+        GolemSettings.TextDisplays style = this.config.golems().visuals.textDisplays;
         Location at = block.getLocation().add(0.5D, style.chestOffsetY, 0.5D);
         for (org.bukkit.entity.Entity nearby : block.getWorld().getNearbyEntities(at, 0.8D, 0.8D, 0.8D)) {
             if (!(nearby instanceof TextDisplay display)) {
@@ -1148,6 +1149,23 @@ public final class SoulChestService {
         }
         for (ItemStack stack : chest.getBlockInventory().getContents()) {
             if (stack != null && !stack.isEmpty() && Tag.STAIRS.isTagged(stack.getType())) {
+                return stack.getType();
+            }
+        }
+        return null;
+    }
+
+    public Material findCopperGolemStatue(SoulGolemData data) {
+        Chest chest = chestAt(data);
+        if (chest == null) {
+            return null;
+        }
+        for (ItemStack stack : chest.getBlockInventory().getContents()) {
+            if (stack == null || stack.isEmpty()) {
+                continue;
+            }
+            String name = stack.getType().name();
+            if (name.endsWith("COPPER_GOLEM_STATUE") || name.equals("COPPER_GOLEM_STATUE")) {
                 return stack.getType();
             }
         }
@@ -1265,14 +1283,17 @@ public final class SoulChestService {
     }
 
     public int effectiveRadius(SoulGolemData data) {
-        Settings settings = this.config.settings();
+        GolemSettings golems = this.config.golems();
+        if (data.type() == GolemType.DIGGER) {
+            return Math.max(2, golems.digger.pitSize / 2);
+        }
         double multiplier = 1.0D;
-        for (Settings.LevelStats level : settings.levels) {
+        for (GolemSettings.LevelStats level : golems.levels) {
             if (level.level == data.level()) {
                 multiplier = level.radiusMultiplier;
                 break;
             }
         }
-        return Math.max(1, (int) Math.round(settings.workRadius * multiplier));
+        return Math.max(1, (int) Math.round(golems.workRadius * multiplier));
     }
 }

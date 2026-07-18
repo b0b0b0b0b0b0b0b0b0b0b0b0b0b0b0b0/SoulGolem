@@ -1,7 +1,7 @@
 package bm.b0b0b0.SoulGolem.service;
 
 import bm.b0b0b0.SoulGolem.config.ConfigurationLoader;
-import bm.b0b0b0.SoulGolem.config.settings.Settings;
+import bm.b0b0b0.SoulGolem.config.settings.GolemSettings;
 import bm.b0b0b0.SoulGolem.model.ActiveGolem;
 import bm.b0b0b0.SoulGolem.model.CropType;
 import bm.b0b0b0.SoulGolem.model.GolemType;
@@ -125,7 +125,7 @@ public final class FarmAreaService {
     }
 
     public boolean isBorderMaterial(Material type) {
-        String configured = this.configurationLoader.config().settings().borderMaterial;
+        String configured = this.configurationLoader.config().golems().borderMaterial;
         Material border = Material.matchMaterial(configured == null ? "PURPLE_WOOL" : configured);
         return border != null && type == border;
     }
@@ -139,49 +139,115 @@ public final class FarmAreaService {
                 || type == Material.DIRT_PATH;
     }
 
-    public static boolean isVegetation(Material type) {
-        if (type == Material.SHORT_GRASS
-                || type == Material.TALL_GRASS
-                || type == Material.FERN
-                || type == Material.LARGE_FERN
-                || type == Material.DEAD_BUSH
-                || type == Material.BUSH
-                || type == Material.FIREFLY_BUSH
-                || type == Material.SHORT_DRY_GRASS
-                || type == Material.TALL_DRY_GRASS
-                || type == Material.WILDFLOWERS
-                || type == Material.CACTUS_FLOWER
-                || type == Material.SEAGRASS
-                || type == Material.TALL_SEAGRASS
-                || type == Material.SWEET_BERRY_BUSH
-                || type == Material.PINK_PETALS
-                || type == Material.LEAF_LITTER
-                || type == Material.AZALEA
-                || type == Material.FLOWERING_AZALEA
-                || type == Material.ROSE_BUSH) {
+    public static boolean isFoliage(Material type) {
+        if (type == null || type.isAir()) {
+            return false;
+        }
+        if (Tag.LEAVES.isTagged(type)) {
             return true;
         }
-        if (Tag.FLOWERS.isTagged(type) || Tag.SMALL_FLOWERS.isTagged(type)) {
+        if (Tag.CLIMBABLE.isTagged(type)) {
+            return type != Material.LADDER && type != Material.SCAFFOLDING;
+        }
+        return false;
+    }
+
+    public static boolean isVegetation(Material type) {
+        if (type == null || type.isAir() || isAnyCrop(type)) {
+            return false;
+        }
+        if (type == Material.WATER
+                || type == Material.LAVA
+                || type == Material.BUBBLE_COLUMN
+                || type == Material.FIRE
+                || type == Material.SOUL_FIRE) {
+            return false;
+        }
+        if (isFoliage(type)
+                || Tag.FLOWERS.isTagged(type)
+                || Tag.SMALL_FLOWERS.isTagged(type)
+                || Tag.SAPLINGS.isTagged(type)
+                || Tag.REPLACEABLE.isTagged(type)) {
+            return true;
+        }
+        return type.isSolid() && !type.isOccluding() && !isBuiltDecoration(type);
+    }
+
+    private static boolean isBuiltDecoration(Material type) {
+        return SoulChestService.isChestLike(type)
+                || type == Material.CRAFTING_TABLE
+                || type == Material.COMPOSTER
+                || type == Material.FURNACE
+                || type == Material.BLAST_FURNACE
+                || type == Material.SMOKER
+                || type == Material.LADDER
+                || type == Material.SCAFFOLDING
+                || type == Material.LIGHTNING_ROD
+                || Tag.STAIRS.isTagged(type)
+                || Tag.SLABS.isTagged(type)
+                || Tag.FENCES.isTagged(type)
+                || Tag.FENCE_GATES.isTagged(type)
+                || Tag.WALLS.isTagged(type)
+                || Tag.DOORS.isTagged(type)
+                || Tag.TRAPDOORS.isTagged(type)
+                || Tag.ALL_SIGNS.isTagged(type)
+                || Tag.BANNERS.isTagged(type)
+                || Tag.BEDS.isTagged(type)
+                || Tag.WOOL_CARPETS.isTagged(type)
+                || Tag.BUTTONS.isTagged(type)
+                || Tag.PRESSURE_PLATES.isTagged(type)
+                || Tag.RAILS.isTagged(type)
+                || type.name().contains("TORCH")
+                || type.name().contains("LANTERN")
+                || type.name().contains("CANDLE");
+    }
+
+    public static boolean isYardKeepMaterial(Material type) {
+        if (type == null || type.isAir()) {
+            return true;
+        }
+        if (type == Material.WATER || type == Material.LAVA || type == Material.BUBBLE_COLUMN) {
+            return true;
+        }
+        if (SoulChestService.isChestLike(type)
+                || type == Material.CRAFTING_TABLE
+                || type == Material.COMPOSTER
+                || type == Material.FURNACE
+                || type == Material.BLAST_FURNACE
+                || type == Material.SMOKER) {
+            return true;
+        }
+        if (isAnyCrop(type)) {
+            return true;
+        }
+        if (Tag.STAIRS.isTagged(type)
+                || Tag.FENCES.isTagged(type)
+                || Tag.FENCE_GATES.isTagged(type)
+                || Tag.WALLS.isTagged(type)) {
+            return true;
+        }
+        if (type.name().contains("TORCH") || type.name().contains("LANTERN")) {
             return true;
         }
         String name = type.name();
-        return name.endsWith("_SAPLING")
-                || name.endsWith("_BUSH")
-                || name.equals("GRASS")
-                || name.equals("DOUBLE_PLANT");
+        return name.endsWith("_WOOL") || name.endsWith("_CONCRETE");
+    }
+
+    public static boolean isYardJunk(Material type) {
+        return type != null && !type.isAir() && !isYardKeepMaterial(type);
     }
 
     public static void clearVegetation(Block block) {
-        if (!isVegetation(block.getType())) {
+        if (!isVegetation(block.getType()) && !isYardJunk(block.getType()) && block.getType() != Material.SNOW) {
             return;
         }
         Block above = block.getRelative(BlockFace.UP);
         Block below = block.getRelative(BlockFace.DOWN);
         block.setType(Material.AIR, false);
-        if (isVegetation(above.getType())) {
+        if (isVegetation(above.getType()) || isYardJunk(above.getType()) || above.getType() == Material.SNOW) {
             above.setType(Material.AIR, false);
         }
-        if (isVegetation(below.getType())) {
+        if (isVegetation(below.getType()) || isYardJunk(below.getType()) || below.getType() == Material.SNOW) {
             below.setType(Material.AIR, false);
         }
     }
@@ -230,7 +296,7 @@ public final class FarmAreaService {
 
     public List<Block> weedsToClear(SoulGolemData data, int radius) {
         List<Block> list = new ArrayList<>();
-        if (this.configurationLoader.config().settings().farmer.clearBorder) {
+        if (this.configurationLoader.config().golems().yard.clearBorder) {
             list.addAll(areaObstructions(data, radius));
         } else {
             list.addAll(fieldObstructions(data, radius));
@@ -240,7 +306,7 @@ public final class FarmAreaService {
 
     public List<Block> minerJunkToClear(SoulGolemData data, int radius, OreTableService oreTable) {
         List<Block> list = new ArrayList<>();
-        if (!this.configurationLoader.config().settings().miner.clearArea) {
+        if (!this.configurationLoader.config().golems().yard.clearBorder) {
             return list;
         }
         for (Block block : areaObstructions(data, radius)) {
@@ -248,6 +314,35 @@ public final class FarmAreaService {
                 continue;
             }
             list.add(block);
+        }
+        return list;
+    }
+
+    public List<Block> diggerYardWeeds(SoulGolemData data, int radius) {
+        List<Block> list = new ArrayList<>();
+        if (data == null || !this.configurationLoader.config().golems().yard.clearBorder) {
+            return list;
+        }
+        World world = Bukkit.getWorld(data.worldName());
+        if (world == null) {
+            return list;
+        }
+        int homeX = (int) Math.floor(data.homeX());
+        int homeY = (int) Math.floor(data.homeY());
+        int homeZ = (int) Math.floor(data.homeZ());
+        int r = Math.max(1, radius);
+        for (int x = homeX - r; x <= homeX + r; x++) {
+            for (int z = homeZ - r; z <= homeZ + r; z++) {
+                if (isWaterColumn(data, x, z)) {
+                    continue;
+                }
+                for (int y = homeY + 1; y <= homeY + 2; y++) {
+                    Block block = world.getBlockAt(x, y, z);
+                    if (isYardJunk(block.getType()) || block.getType() == Material.SNOW) {
+                        list.add(block);
+                    }
+                }
+            }
         }
         return list;
     }
@@ -362,29 +457,10 @@ public final class FarmAreaService {
         if (type.isAir() || type == Material.WATER || type == Material.LAVA) {
             return false;
         }
-        if (SoulChestService.isChestLike(type) || type == Material.CRAFTING_TABLE || type == Material.COMPOSTER || type == Material.FURNACE
-                || type == Material.BLAST_FURNACE || type == Material.SMOKER) {
+        if (isYardKeepMaterial(type) || isBorderWool(type) || isTorchMaterial(type)) {
             return false;
         }
-        if (Tag.STAIRS.isTagged(type)) {
-            return false;
-        }
-        if (Tag.FENCES.isTagged(type) || Tag.FENCE_GATES.isTagged(type)) {
-            return false;
-        }
-        if (isTorchMaterial(type)) {
-            return false;
-        }
-        if (isAnyCrop(type)) {
-            return false;
-        }
-        if (isBorderWool(type)) {
-            return false;
-        }
-        if (isVegetation(type) || type == Material.SNOW) {
-            return true;
-        }
-        return type.isSolid();
+        return true;
     }
 
     public List<Block> perimeterObstructions(SoulGolemData data, int radius) {
@@ -644,7 +720,7 @@ public final class FarmAreaService {
     }
 
     public int moodScore(SoulGolemData data, int radius) {
-        Settings settings = this.configurationLoader.config().settings();
+        GolemSettings settings = this.configurationLoader.config().golems();
         int score = 0;
         if (hasValidSeat(data)) {
             score++;
@@ -656,7 +732,7 @@ public final class FarmAreaService {
     }
 
     public List<Block> perimeterTorchSpots(SoulGolemData data, int radius) {
-        int max = Math.max(1, this.configurationLoader.config().settings().farmer.maxTorches);
+        int max = Math.max(1, this.configurationLoader.config().golems().yard.maxTorches);
         return perimeterTorchSpots(data, radius, max);
     }
 
@@ -737,17 +813,11 @@ public final class FarmAreaService {
                 || type == Material.SOUL_TORCH || type == Material.SOUL_WALL_TORCH) {
             return true;
         }
-        Settings settings = this.configurationLoader.config().settings();
-        Material farmerTorch = Material.matchMaterial(
-                settings.farmer.torchMaterial == null ? "TORCH" : settings.farmer.torchMaterial
+        GolemSettings settings = this.configurationLoader.config().golems();
+        Material yardTorch = Material.matchMaterial(
+                settings.yard.torchMaterial == null ? "TORCH" : settings.yard.torchMaterial
         );
-        if (farmerTorch != null && type == farmerTorch) {
-            return true;
-        }
-        Material minerTorch = Material.matchMaterial(
-                settings.miner.torchMaterial == null ? "TORCH" : settings.miner.torchMaterial
-        );
-        return minerTorch != null && type == minerTorch;
+        return yardTorch != null && type == yardTorch;
     }
 
     private static boolean containsBlock(List<Block> list, Block block) {
@@ -813,9 +883,7 @@ public final class FarmAreaService {
     }
 
     public Material resolveFenceMaterial(SoulGolemData data) {
-        String raw = data != null && data.type() == GolemType.MINER
-                ? settings().miner.fenceMaterial
-                : settings().farmer.fenceMaterial;
+        String raw = settings().yard.fenceMaterial;
         Material fence = Material.matchMaterial(raw);
         return fence != null && fence.isBlock() ? fence : Material.OAK_FENCE;
     }
@@ -825,24 +893,17 @@ public final class FarmAreaService {
     }
 
     public Material resolveGateMaterial(SoulGolemData data) {
-        String raw = data != null && data.type() == GolemType.MINER
-                ? settings().miner.gateMaterial
-                : settings().farmer.gateMaterial;
+        String raw = settings().yard.gateMaterial;
         Material gate = Material.matchMaterial(raw);
         return gate != null && gate.isBlock() ? gate : Material.OAK_FENCE_GATE;
     }
 
     public boolean isGatePathEnabled(SoulGolemData data) {
-        if (data != null && data.type() == GolemType.MINER) {
-            return settings().miner.placeGatePath;
-        }
-        return settings().farmer.placeGatePath;
+        return settings().yard.placeGatePath;
     }
 
     public Material resolveGatePathMaterial(SoulGolemData data) {
-        String raw = data != null && data.type() == GolemType.MINER
-                ? settings().miner.gatePathMaterial
-                : settings().farmer.gatePathMaterial;
+        String raw = settings().yard.gatePathMaterial;
         Material path = Material.matchMaterial(raw);
         return path != null && path.isBlock() ? path : Material.DIRT_PATH;
     }
@@ -1289,8 +1350,8 @@ public final class FarmAreaService {
         }
     }
 
-    private Settings settings() {
-        return this.configurationLoader.config().settings();
+    private GolemSettings settings() {
+        return this.configurationLoader.config().golems();
     }
 
     public Location standForClear(Block junk) {
@@ -2049,7 +2110,7 @@ public final class FarmAreaService {
         Material border = resolveBorderMaterial();
         Material fence = resolveFenceMaterial(data);
         Material gate = resolveGateMaterial(data);
-        Material wool = Material.matchMaterial(this.configurationLoader.config().settings().borderMaterial);
+        Material wool = Material.matchMaterial(this.configurationLoader.config().golems().borderMaterial);
         if (wool == null || !wool.isBlock()) {
             wool = Material.PURPLE_WOOL;
         }
@@ -2133,7 +2194,7 @@ public final class FarmAreaService {
     }
 
     private Material resolveBorderMaterial() {
-        Material border = Material.matchMaterial(this.configurationLoader.config().settings().borderMaterial);
+        Material border = Material.matchMaterial(this.configurationLoader.config().golems().borderMaterial);
         return border != null && border.isBlock() ? border : Material.PURPLE_WOOL;
     }
 
