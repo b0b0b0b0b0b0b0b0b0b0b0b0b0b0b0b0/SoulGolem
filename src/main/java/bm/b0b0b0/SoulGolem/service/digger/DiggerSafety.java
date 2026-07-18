@@ -40,15 +40,27 @@ public final class DiggerSafety {
         if (location.getWorld() == null) {
             return false;
         }
-        if (!farmArea.insideWoolBorder(data, location)) {
-            return true;
-        }
         Block at = location.getBlock();
         Block below = at.getRelative(BlockFace.DOWN);
         if (at.isLiquid() || below.isLiquid()) {
             return true;
         }
         if (farmArea.isWaterColumn(data, location.getBlockX(), location.getBlockZ())) {
+            return true;
+        }
+        if (data.hasDigProgress()) {
+            int radius = DiggerPit.radius(digger);
+            int x = location.getBlockX();
+            int z = location.getBlockZ();
+            if (DiggerPit.isInsidePit(data, x, z, radius)) {
+                int layerY = data.digLayerY();
+                double y = location.getY();
+                if (y >= layerY - 0.5D && y <= data.digStartY() + 2.5D) {
+                    return !hasSolidSupport(location);
+                }
+            }
+        }
+        if (!farmArea.insideWoolBorder(data, location)) {
             return true;
         }
         if (hasSolidSupport(location)) {

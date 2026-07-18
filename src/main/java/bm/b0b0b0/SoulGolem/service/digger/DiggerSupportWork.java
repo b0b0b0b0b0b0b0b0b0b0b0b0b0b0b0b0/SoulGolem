@@ -53,8 +53,7 @@ public final class DiggerSupportWork {
         int radius = this.ctx.chestService().effectiveRadius(golem.data());
         var pit = this.ctx.pitData(golem);
         if (pit.hasDigProgress()) {
-            int dug = pit.digStartY() - pit.digLayerY();
-            if (dug < Math.max(1, this.ctx.digger().maxDepth)) {
+            if (!DiggerDigWork.isPitComplete(pit, this.ctx.digger())) {
                 golem.targetCrop(null);
                 golem.diggerState(DiggerState.IDLE);
                 return;
@@ -100,7 +99,7 @@ public final class DiggerSupportWork {
         }
         if (GolemMovement.horizontalDistanceSquared(copper.getLocation(), stand) > 2.25D) {
             golem.diggerState(DiggerState.MOVING_TO_CLEAR);
-            this.ctx.walkTowards(copper, stand, golem.data());
+            this.ctx.walkTowards(copper, stand, golem);
             return;
         }
         copper.setVelocity(new Vector(0, 0, 0));

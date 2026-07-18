@@ -37,7 +37,7 @@ public final class DiggerChestWork {
         SoulChestLid lid = this.ctx.chestService().lid();
         SoulChestLink link = this.ctx.chestLink();
         SoulGolemData pit = this.ctx.pitData(golem);
-        boolean crewReturn = DiggerDigWork.isCrewReturning(golem, pit, this.ctx.digger().maxDepth);
+        boolean crewReturn = DiggerDigWork.isCrewReturning(golem, pit, this.ctx.digger());
         Location chestStand = this.ctx.chestService().chestStandLocation(golem.data());
         if (chestStand == null) {
             lid.closeNow(golem.data());
@@ -196,7 +196,7 @@ public final class DiggerChestWork {
         golem.markDirty();
 
         SoulGolemData pit = this.ctx.pitData(golem);
-        if (DiggerDigWork.isCrewReturning(golem, pit, this.ctx.digger().maxDepth)) {
+        if (DiggerDigWork.isCrewReturning(golem, pit, this.ctx.digger())) {
             return;
         }
         if (isDepthDone(pit) && !golem.data().isCrewHelper()) {
@@ -342,7 +342,6 @@ public final class DiggerChestWork {
     }
 
     private boolean isDepthDone(SoulGolemData data) {
-        int dug = data.digStartY() - data.digLayerY();
-        return dug >= Math.max(1, this.ctx.digger().maxDepth);
+        return DiggerDigWork.isPitComplete(data, this.ctx.digger());
     }
 }

@@ -60,7 +60,7 @@ public final class GolemMovement {
             return;
         }
 
-        double speed = Math.max(1.0D, this.settings.walkSpeed);
+        double speed = walkSpeed(golem, from, goal);
         if (golem != null) {
             Location look = target.clone();
             look.setY(look.getY() + 0.9D);
@@ -72,6 +72,41 @@ public final class GolemMovement {
         copper.getPathfinder().moveTo(goal, speed);
     }
 
+    public void walkClimbStair(CopperGolem copper, Location target, ActiveGolem golem) {
+        Location from = copper.getLocation();
+        if (from.getWorld() == null || target.getWorld() == null || !from.getWorld().equals(target.getWorld())) {
+            return;
+        }
+        Location goal = target.clone();
+        snapClimbFeet(goal);
+        if (horizontalDistanceSquared(from, goal) < ARRIVE_SQ
+                && Math.abs(from.getY() - goal.getY()) < 0.55D) {
+            stop(copper);
+            return;
+        }
+        double speed = Math.max(1.35D, walkSpeed(golem, from, goal) * 1.1D);
+        if (golem != null) {
+            GolemGaze.face(golem, goal.clone().add(0.0D, 0.6D, 0.0D));
+        }
+        if (alreadyPathingTo(copper, goal)) {
+            return;
+        }
+        copper.getPathfinder().moveTo(goal, speed);
+    }
+
+    private static void snapClimbFeet(Location next) {
+        Block feet = next.getBlock();
+        Block below = feet.getRelative(0, -1, 0);
+        Material belowType = below.getType();
+        if (Tag.STAIRS.isTagged(belowType) || belowType.isSolid() || belowType == Material.FARMLAND) {
+            next.setY(below.getY() + 1.0D);
+            return;
+        }
+        if (Tag.STAIRS.isTagged(feet.getType()) || feet.getType().isSolid()) {
+            next.setY(feet.getY() + 1.0D);
+        }
+    }
+
     public void stop(CopperGolem copper) {
         if (copper == null || !copper.isValid()) {
             return;
@@ -79,6 +114,19 @@ public final class GolemMovement {
         copper.getPathfinder().stopPathfinding();
         Vector velocity = copper.getVelocity();
         copper.setVelocity(new Vector(0.0D, velocity.getY(), 0.0D));
+    }
+
+    private double walkSpeed(ActiveGolem golem, Location from, Location goal) {
+        double speed = Math.max(1.0D, this.settings.walkSpeed);
+        if (golem == null || !this.settings.stickBoostEnabled || !golem.workBoostActive()) {
+            return speed;
+        }
+        double dist2 = horizontalDistanceSquared(from, goal);
+        if (dist2 <= 4.0D) {
+            return speed;
+        }
+        double boost = Math.max(1.0D, this.settings.stickBoostWalkMultiplier);
+        return Math.min(speed * boost, 1.75D);
     }
 
     private static boolean alreadyPathingTo(CopperGolem copper, Location goal) {
@@ -235,7 +283,7 @@ public final class GolemMovement {
         Block feet = next.getBlock();
         Material feetType = feet.getType();
         if (Tag.FENCES.isTagged(feetType) || Tag.FENCE_GATES.isTagged(feetType)) {
-            pushOffFenceColumn(next, homeX, homeY, homeZ);
+            pushOffFenceColumn(next, data, homeX, homeY, homeZ);
             return;
         }
         Block below = feet.getRelative(0, -1, 0);
@@ -247,28 +295,58 @@ public final class GolemMovement {
                 next.setY(below.getY() + 1.0D);
             }
             if (Tag.FENCES.isTagged(next.getBlock().getType()) || Tag.FENCE_GATES.isTagged(next.getBlock().getType())) {
-                pushOffFenceColumn(next, homeX, homeY, homeZ);
+                pushOffFenceColumn(next, data, homeX, homeY, homeZ);
             }
             return;
         }
         if (feetType.isSolid() || feetType == Material.FARMLAND) {
             if (Tag.FENCES.isTagged(feetType) || Tag.FENCE_GATES.isTagged(feetType)) {
-                pushOffFenceColumn(next, homeX, homeY, homeZ);
+                pushOffFenceColumn(next, data, homeX, homeY, homeZ);
             } else {
                 next.setY(feet.getY() + 1.0D);
             }
             return;
         }
-        Block ground = next.getWorld().getBlockAt(next.getBlockX(), homeY, next.getBlockZ());
-        if (ground.getType().isSolid() || ground.getType() == Material.FARMLAND) {
-            next.setY(homeY + 1.0D);
+        int floorY = resolveFloorY(next, data, homeY);
+        if (floorY >= 0) {
+            next.setY(floorY + 1.0D);
         }
         if (Tag.FENCES.isTagged(next.getBlock().getType()) || Tag.FENCE_GATES.isTagged(next.getBlock().getType())) {
-            pushOffFenceColumn(next, homeX, homeY, homeZ);
+            pushOffFenceColumn(next, data, homeX, homeY, homeZ);
         }
     }
 
-    private static void pushOffFenceColumn(Location next, int homeX, int homeY, int homeZ) {
+    private static int resolveFloorY(Location next, SoulGolemData data, int homeY) {
+        if (!data.hasDigProgress() || next.getY() >= homeY - 0.5D) {
+            Block ground = next.getWorld().getBlockAt(next.getBlockX(), homeY, next.getBlockZ());
+            if (ground.getType().isSolid() || ground.getType() == Material.FARMLAND) {
+                return homeY;
+            }
+            return -1;
+        }
+        int layerY = data.digLayerY();
+        int startY = data.digStartY();
+        int fromY = Math.min(next.getBlockY(), startY);
+        int toY = Math.max(layerY - 1, fromY - 3);
+        for (int y = fromY; y >= toY; y--) {
+            Block ground = next.getWorld().getBlockAt(next.getBlockX(), y, next.getBlockZ());
+            Material type = ground.getType();
+            if (type.isSolid() || type == Material.FARMLAND || Tag.STAIRS.isTagged(type)) {
+                return y;
+            }
+        }
+        Block layerGround = next.getWorld().getBlockAt(next.getBlockX(), layerY, next.getBlockZ());
+        if (layerGround.getType().isSolid() || layerGround.getType() == Material.FARMLAND) {
+            return layerY;
+        }
+        Block homeGround = next.getWorld().getBlockAt(next.getBlockX(), homeY, next.getBlockZ());
+        if (homeGround.getType().isSolid() || homeGround.getType() == Material.FARMLAND) {
+            return homeY;
+        }
+        return layerY;
+    }
+
+    private static void pushOffFenceColumn(Location next, SoulGolemData data, int homeX, int homeY, int homeZ) {
         int bx = next.getBlockX();
         int bz = next.getBlockZ();
         int nx = bx + Integer.compare(homeX, bx);
@@ -278,7 +356,8 @@ public final class GolemMovement {
         }
         next.setX(nx + 0.5D);
         next.setZ(nz + 0.5D);
-        next.setY(homeY + 1.0D);
+        int floorY = resolveFloorY(next, data, homeY);
+        next.setY((floorY >= 0 ? floorY : homeY) + 1.0D);
         if (Tag.FENCES.isTagged(next.getBlock().getType()) || Tag.FENCE_GATES.isTagged(next.getBlock().getType())) {
             nx = bx + Integer.compare(homeX, bx) * 2;
             nz = bz + Integer.compare(homeZ, bz) * 2;
@@ -287,7 +366,8 @@ public final class GolemMovement {
             }
             next.setX(nx + 0.5D);
             next.setZ(nz + 0.5D);
-            next.setY(homeY + 1.0D);
+            floorY = resolveFloorY(next, data, homeY);
+            next.setY((floorY >= 0 ? floorY : homeY) + 1.0D);
         }
     }
 

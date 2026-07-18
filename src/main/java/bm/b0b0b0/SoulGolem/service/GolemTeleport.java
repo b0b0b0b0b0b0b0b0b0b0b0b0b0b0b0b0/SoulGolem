@@ -18,9 +18,9 @@ public final class GolemTeleport {
             return false;
         }
         copper.setVelocity(new Vector(0, 0, 0));
-        copper.setNoPhysics(true);
+        copper.setNoPhysics(false);
         copper.setGravity(false);
-        copper.setCollidable(false);
+        copper.setCollidable(true);
 
         Location dest = to.clone();
         if (copper.teleport(dest, TeleportFlag.EntityState.RETAIN_PASSENGERS)) {

@@ -51,7 +51,7 @@ public final class DiggerCrewWork {
             return false;
         }
         SoulGolemData pit = this.ctx.pitData(leader);
-        if (DiggerDigWork.isPitComplete(pit, this.ctx.digger().maxDepth)) {
+        if (DiggerDigWork.isPitComplete(pit, this.ctx.digger())) {
             return false;
         }
         int max = Math.max(1, this.ctx.digger().maxCrew);
@@ -152,7 +152,7 @@ public final class DiggerCrewWork {
         data.energy(this.ctx.settings().energyCapacity);
         data.paused(false);
         data.crewLeaderId(leaderData.id());
-        DiggerDigWork.ensureDigProgress(leaderData);
+        DiggerDigWork.ensureDigProgress(leaderData, this.ctx.digger(), this.ctx.farmAreaService());
 
         Location spawnAt = stand.clone().add(0.0D, 0.15D, 0.0D);
         playHireFx(spawnAt);

@@ -45,19 +45,24 @@ public final class GolemSettings extends YamlSerializable {
     public double walkSpeed = 1.0D;
 
     @Comment({
-            @CommentValue("Owner hit with a stick: temporary work speed boost (all soul golems)")
+            @CommentValue("Owner playful stick slap: temporary pep boost (all soul golems)")
     })
     public boolean stickBoostEnabled = true;
 
     @Comment({
             @CommentValue("Stick boost duration in milliseconds")
     })
-    public long stickBoostDurationMs = 20_000L;
+    public long stickBoostDurationMs = 15_000L;
 
     @Comment({
-            @CommentValue("Work/dig speed multiplier while stick boost is active (2.0 = twice as fast)")
+            @CommentValue("Work/dig speed multiplier while stick boost is active (3.0 = three times faster)")
     })
-    public double stickBoostMultiplier = 2.0D;
+    public double stickBoostMultiplier = 3.0D;
+
+    @Comment({
+            @CommentValue("Pathfinder speed multiplier during stick boost (capped; near targets walk is normal)")
+    })
+    public double stickBoostWalkMultiplier = 1.55D;
 
     @Comment({
             @CommentValue("If this item is in the soul chest, golems deposit/withdraw remotely (no walk to chest)")
@@ -68,6 +73,11 @@ public final class GolemSettings extends YamlSerializable {
             @CommentValue("Item that enables remote chest link (kept in the chest, not consumed)")
     })
     public String chestLinkItem = "HOPPER";
+
+    @Comment({
+            @CommentValue("Owner may break/place in the soul-chest column this many blocks below the chest (hopper + buffer chest)")
+    })
+    public int ownerChestUnderDepth = 5;
 
     @Comment({
             @CommentValue("Ticks spent mining one block (animation)")
@@ -551,9 +561,9 @@ public final class GolemSettings extends YamlSerializable {
         public int pitSize = 8;
 
         @Comment({
-                @CommentValue("How many layers to dig down from the surface floor")
+                @CommentValue("Max layers to dig from surface. 0 = dig all the way down to bedrock")
         })
-        public int maxDepth = 30;
+        public int maxDepth = 0;
 
         @Comment({
                 @CommentValue("How many blocks to carry to the chest per trip")
@@ -619,6 +629,11 @@ public final class GolemSettings extends YamlSerializable {
                 @CommentValue("Dig duration for hard blocks (stone/ores) in ticks")
         })
         public long hardDigDurationTicks = 12L;
+
+        @Comment({
+                @CommentValue("Console dig debug logs: seek/assign/scan/walk/hit/break/claims. Default ON.")
+        })
+        public boolean digDebugLogs = true;
 
         @Comment({
                 @CommentValue("Unused: diggers climb out via stone spiral stairs. Kept for config compatibility.")

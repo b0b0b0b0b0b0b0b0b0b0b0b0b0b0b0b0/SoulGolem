@@ -10,11 +10,15 @@ import bm.b0b0b0.SoulGolem.service.GolemGaze;
 import bm.b0b0b0.SoulGolem.service.GolemGroundLootWork;
 import bm.b0b0b0.SoulGolem.service.GolemMovement;
 import bm.b0b0b0.SoulGolem.service.SoulChestLink;
+import bm.b0b0b0.SoulGolem.service.SoulChestService;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.logging.Logger;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -30,6 +34,7 @@ public final class DiggerDigWork {
     private final DiggerContext ctx;
     private DiggerSupportWork support;
     private DiggerCrewWork crew;
+    private final Map<String, Long> logThrottle = new ConcurrentHashMap<>();
 
     public DiggerDigWork(DiggerContext ctx) {
         this.ctx = ctx;
@@ -43,14 +48,34 @@ public final class DiggerDigWork {
     public void beginSeek(ActiveGolem golem, CopperGolem copper) {
         SoulGolemData pit = this.ctx.pitData(golem);
         boolean linked = this.ctx.chestLink().isLinked(pit);
+        Location feet = copper.getLocation();
+        digLog(golem, "seek-start state=" + golem.diggerState()
+                + " feet=" + locPos(feet)
+                + " energy=" + golem.data().energy()
+                + " carried=" + carriedCount(golem)
+                + " linked=" + linked
+                + " homeY=" + (int) Math.floor(pit.homeY())
+                + " digStartY=" + pit.digStartY()
+                + " digLayerY=" + pit.digLayerY()
+                + " stair=" + pit.digStairIndex()
+                + " progress=" + pit.hasDigProgress()
+                + " depthDone=" + isDepthDone(pit));
 
-        ensureDigProgress(pit);
+        int layerBefore = pit.hasDigProgress() ? pit.digLayerY() : Integer.MIN_VALUE;
+        ensureDigProgress(pit, this.ctx.digger(), this.ctx.farmAreaService());
+        if (pit.hasDigProgress() && layerBefore != Integer.MIN_VALUE && pit.digLayerY() > layerBefore) {
+            digLog(golem, "surface-raise " + layerBefore + "->" + pit.digLayerY()
+                    + " digStartY=" + pit.digStartY());
+        }
         if (isDepthDone(pit)) {
+            digLog(golem, "seek-stop pit-complete digStartY=" + pit.digStartY()
+                    + " digLayerY=" + pit.digLayerY());
             handlePitComplete(golem, copper, linked);
             return;
         }
 
         if (!golem.data().isCrewHelper() && this.crew != null && this.crew.tryHireFromChest(golem, copper)) {
+            digLog(golem, "seek-stop hired-helper");
             golem.data().lastActionAt(System.currentTimeMillis());
             return;
         }
@@ -63,6 +88,7 @@ public final class DiggerDigWork {
             linkDump(golem, copper, false);
             linkFeed(golem, copper);
             if (golem.data().energy() <= 0) {
+                digLog(golem, "seek-stop no-energy linked");
                 abandonDigTarget(golem);
                 golem.diggerState(DiggerState.IDLE);
                 golem.data().lastActionAt(System.currentTimeMillis());
@@ -71,6 +97,7 @@ public final class DiggerDigWork {
             if (!this.ctx.chestService().hasSpace(golem.data())) {
                 linkDump(golem, copper, true);
                 if (!this.ctx.chestService().hasSpace(golem.data())) {
+                    digLog(golem, "seek-stop chest-full linked");
                     golem.diggerState(DiggerState.WAITING_CHEST);
                     this.ctx.notifyChestFull(golem);
                     return;
@@ -78,17 +105,25 @@ public final class DiggerDigWork {
             }
             golem.chestFullNotified(false);
             if (resumeDigTarget(golem, copper, pit)) {
+                digLog(golem, "seek-resume existing-target");
                 return;
             }
+            releaseAbandonedClaims(this.ctx.pitId(golem), pit);
             assignDigTarget(golem, copper, pit);
             return;
         }
 
+        if (layerHasDiggable(pit)) {
+            releaseAbandonedClaims(this.ctx.pitId(golem), pit);
+        }
         if (carriedCount(golem) >= this.ctx.digger().blocksPerTrip) {
+            digLog(golem, "seek-stop trip-full carried=" + carriedCount(golem)
+                    + " limit=" + this.ctx.digger().blocksPerTrip);
             golem.diggerState(DiggerState.MOVING_TO_CHEST);
             return;
         }
         if (!golem.carried().isEmpty() && !this.ctx.chestService().hasSpace(golem.data())) {
+            digLog(golem, "seek-stop chest-full carried=" + carriedCount(golem));
             golem.diggerState(DiggerState.WAITING_CHEST);
             this.ctx.notifyChestFull(golem);
             return;
@@ -97,15 +132,18 @@ public final class DiggerDigWork {
             abandonDigTarget(golem);
         }
         if (this.ctx.tryStartFeed(golem)) {
+            digLog(golem, "seek-stop feeding energy=" + golem.data().energy());
             return;
         }
         if (golem.data().energy() <= 0) {
+            digLog(golem, "seek-stop no-energy");
             abandonDigTarget(golem);
             golem.diggerState(DiggerState.IDLE);
             golem.data().lastActionAt(System.currentTimeMillis());
             return;
         }
         if (!this.ctx.chestService().hasSpace(golem.data())) {
+            digLog(golem, "seek-stop chest-full empty-hands");
             golem.diggerState(DiggerState.WAITING_CHEST);
             this.ctx.notifyChestFull(golem);
             return;
@@ -117,9 +155,11 @@ public final class DiggerDigWork {
 
         boolean digPriority = pit.hasDigProgress() && !isDepthDone(pit);
         if (!digPriority) {
+            digLog(golem, "seek-yard digPriority=false hasProgress=" + pit.hasDigProgress());
             if (yard.collectGroundLoot) {
                 GolemGroundLootWork.Phase loot = this.ctx.groundLoot().tick(golem, copper, true);
                 if (loot == GolemGroundLootWork.Phase.MOVING || loot == GolemGroundLootWork.Phase.PICKED) {
+                    digLog(golem, "seek-stop ground-loot phase=" + loot);
                     golem.diggerState(DiggerState.IDLE);
                     return;
                 }
@@ -127,6 +167,7 @@ public final class DiggerDigWork {
             if (!golem.data().isCrewHelper() && yard.clearBorder) {
                 var junk = this.ctx.farmAreaService().diggerYardWeeds(pit, radius);
                 if (!junk.isEmpty()) {
+                    digLog(golem, "seek-stop yard-clear junk=" + junk.size());
                     golem.clearFetchFlags();
                     golem.targetCrop(junk.get(0).getLocation());
                     golem.diggerState(DiggerState.MOVING_TO_CLEAR);
@@ -138,22 +179,27 @@ public final class DiggerDigWork {
                     && yard.placeTorches
                     && this.ctx.chestService().countItem(pit, torch) > 0
                     && !this.ctx.farmAreaService().perimeterTorchSpots(pit, radius, yard.maxTorches).isEmpty()) {
+                digLog(golem, "seek-stop torch-job");
                 golem.clearFetchFlags();
                 golem.fetchingTorch(true);
                 golem.diggerState(DiggerState.MOVING_TO_CHEST);
                 return;
             }
             if (!golem.data().isCrewHelper() && this.support.tryStartFenceJob(golem)) {
+                digLog(golem, "seek-stop fence-job");
                 return;
             }
             if (!golem.data().isCrewHelper() && this.support.tryStartSeatJob(golem, radius)) {
+                digLog(golem, "seek-stop seat-job");
                 return;
             }
         }
 
         if (resumeDigTarget(golem, copper, pit)) {
+            digLog(golem, "seek-resume existing-target");
             return;
         }
+        releaseAbandonedClaims(this.ctx.pitId(golem), pit);
         assignDigTarget(golem, copper, pit);
     }
 
@@ -166,12 +212,15 @@ public final class DiggerDigWork {
         UUID pitId = this.ctx.pitId(golem);
         UUID diggerId = golem.data().id();
         if (!DiggerPit.isDiggable(block, pit, this.ctx.chestService(), this.ctx.farmAreaService(), this.ctx.digger())) {
+            digLog(golem, "resume-drop not-diggable " + blockPos(block)
+                    + " type=" + block.getType()
+                    + " why=" + whyNotDiggable(block, pit));
             clearDigTarget(golem, block);
             return false;
         }
-        double dx = copper.getLocation().getX() - (block.getX() + 0.5D);
-        double dz = copper.getLocation().getZ() - (block.getZ() + 0.5D);
-        if (!canTakeClaim(pitId, block, diggerId, dx * dx + dz * dz)) {
+        if (!canTakeClaim(pitId, block, diggerId)) {
+            digLog(golem, "resume-drop claim-busy " + blockPos(block)
+                    + " owner=" + shortId(DiggerClaims.owner(pitId, block)));
             clearDigTarget(golem, block);
             return false;
         }
@@ -196,18 +245,50 @@ public final class DiggerDigWork {
     }
 
     private void assignDigTarget(ActiveGolem golem, CopperGolem copper, SoulGolemData pit) {
+        UUID pitId = this.ctx.pitId(golem);
+        LayerScan scan = scanLayer(pit, pitId, golem.data().id());
+        digLog(golem, "assign-scan " + scan.summary()
+                + " digStartY=" + pit.digStartY()
+                + " digLayerY=" + pit.digLayerY()
+                + " stair=" + pit.digStairIndex()
+                + " surfaceFill=" + DiggerPit.findHighestPitFillY(pit, this.ctx.digger(), this.ctx.farmAreaService()));
+        releaseAbandonedClaims(pitId, pit);
         Block next = findNextDigBlock(golem, copper, pit);
+        if (next == null) {
+            digLog(golem, "assign-miss pass=1 " + scan.summary());
+            releaseAbandonedClaims(pitId, pit);
+            next = findNextDigBlock(golem, copper, pit);
+        }
         if (next == null) {
             golem.wanderTarget(null);
             if (isDepthDone(pit)) {
+                digLog(golem, "assign-stop pit-complete");
                 handlePitComplete(golem, copper, this.ctx.chestLink().isLinked(pit));
                 return;
             }
+            if (layerHasDiggable(pit)) {
+                digLog(golem, "assign-force-claims diggable=" + scan.diggable + " claimedBusy=" + scan.claimedBusy);
+                forceReleaseLayerClaims(pitId, pit);
+                next = findNextDigBlock(golem, copper, pit);
+            }
+        }
+        if (next == null) {
+            LayerScan after = scanLayer(pit, pitId, golem.data().id());
+            if (layerHasDiggable(pit)) {
+                digLogThrottled(golem, "stuck-noclaim", 2000L,
+                        "stuck diggable-but-no-claim " + after.summary()
+                                + " sample=" + after.sampleWhy);
+                golem.diggerState(DiggerState.IDLE);
+                golem.data().lastActionAt(System.currentTimeMillis());
+                return;
+            }
+            digLogThrottled(golem, "layer-empty", 2000L,
+                    "layer-empty -> stair/descend " + after.summary()
+                            + " sample=" + after.sampleWhy);
             if (!golem.data().isCrewHelper()) {
                 golem.diggerState(DiggerState.PLACING_STAIR);
                 placeStairAndDescend(golem, copper);
             } else {
-                ensureCurrentStairPlaced(golem, pit);
                 golem.diggerState(DiggerState.IDLE);
                 golem.data().lastActionAt(System.currentTimeMillis());
             }
@@ -220,24 +301,33 @@ public final class DiggerDigWork {
         Location stand = stableStandForDig(golem, copper, next, pit);
         if (stand == null) {
             stand = next.getLocation().add(0.5D, 1.0D, 0.5D);
+            digLog(golem, "assign " + blockPos(next) + " type=" + next.getType()
+                    + " stand=FALLBACK " + locPos(stand));
+        } else {
+            digLog(golem, "assign " + blockPos(next) + " type=" + next.getType()
+                    + " stand=" + locPos(stand));
         }
         golem.wanderTarget(stand.clone());
-        if (GolemMovement.horizontalDistanceSquared(copper.getLocation(), stand) <= 1.69D
-                && Math.abs(copper.getLocation().getY() - stand.getY()) <= 1.6D) {
-            copper.setVelocity(new Vector(0, 0, 0));
-            this.ctx.equipForBlock(copper, next.getType());
-            golem.diggerState(DiggerState.DIGGING);
-            GolemGaze.faceBlock(golem, next);
-            golem.mineTicksLeft(this.ctx.digDurationTicks(next.getType(), golem));
-            this.ctx.playDigFx(next);
+        if (canReachDigStand(copper, stand)) {
+            digLog(golem, "assign-reach start-dig now");
+            startDiggingBlock(golem, copper, next);
             return;
         }
+        digLog(golem, "assign-walk to=" + locPos(stand)
+                + " from=" + locPos(copper.getLocation())
+                + " dist2=" + GolemMovement.horizontalDistanceSquared(copper.getLocation(), stand));
         this.ctx.walkTowards(copper, stand, golem);
     }
 
     public void continueMoveToDig(ActiveGolem golem, CopperGolem copper) {
         Location target = golem.targetOre();
         if (target == null) {
+            SoulGolemData pit = this.ctx.pitData(golem);
+            digLog(golem, "move no-target diggable=" + layerHasDiggable(pit));
+            if (layerHasDiggable(pit)) {
+                assignDigTarget(golem, copper, pit);
+                return;
+            }
             golem.wanderTarget(null);
             golem.diggerState(DiggerState.IDLE);
             return;
@@ -245,6 +335,7 @@ public final class DiggerDigWork {
         SoulGolemData pit = this.ctx.pitData(golem);
         Block block = target.getBlock();
         if (golem.data().energy() <= 0) {
+            digLog(golem, "move-abort no-energy " + blockPos(block));
             clearDigTarget(golem, block);
             golem.diggerState(DiggerState.IDLE);
             return;
@@ -252,77 +343,130 @@ public final class DiggerDigWork {
         if (!this.ctx.chestLink().isLinked(pit)
                 && golem.data().energy() <= this.ctx.settings().energyHungryThreshold
                 && this.ctx.chestService().countItem(pit, this.ctx.settings().energyFeedMaterial()) > 0) {
+            digLog(golem, "move-abort feed " + blockPos(block));
             clearDigTarget(golem, block);
             this.ctx.tryStartFeed(golem);
             return;
         }
         if (!DiggerPit.isDiggable(block, pit, this.ctx.chestService(), this.ctx.farmAreaService(), this.ctx.digger())) {
+            digLog(golem, "move-abort not-diggable " + blockPos(block)
+                    + " type=" + block.getType()
+                    + " why=" + whyNotDiggable(block, pit));
             clearDigTarget(golem, block);
             golem.diggerState(DiggerState.IDLE);
             return;
         }
-        if (!DiggerPit.prepareDigFloor(block, this.ctx.digger())) {
-            clearDigTarget(golem, block);
-            golem.diggerState(DiggerState.IDLE);
-            return;
-        }
+        DiggerPit.prepareDigFloor(block, this.ctx.digger());
         Location stand = stableStandForDig(golem, copper, block, pit);
         if (stand == null || !DiggerSafety.hasSolidSupport(stand)) {
             if (GolemMovement.horizontalDistanceSquared(copper.getLocation(), block.getLocation().add(0.5D, 1.0D, 0.5D)) <= 2.25D) {
                 stand = copper.getLocation();
+                digLogThrottled(golem, "stand-self", 1500L, "move-stand use-self near " + blockPos(block));
             } else {
+                digLog(golem, "move-abort no-stand " + blockPos(block)
+                        + " type=" + block.getType()
+                        + " supportFail standNull=" + (stand == null));
                 clearDigTarget(golem, block);
-                golem.diggerState(DiggerState.IDLE);
+                assignDigTarget(golem, copper, pit);
                 return;
             }
         }
         golem.wanderTarget(stand.clone());
         double standDist2 = GolemMovement.horizontalDistanceSquared(copper.getLocation(), stand);
-        if (standDist2 <= 2.25D) {
+        double dy = Math.abs(copper.getLocation().getY() - stand.getY());
+        Location blockCenter = block.getLocation().add(0.5D, 1.0D, 0.5D);
+        double blockDist2 = GolemMovement.horizontalDistanceSquared(copper.getLocation(), blockCenter);
+        double blockDy = Math.abs(copper.getLocation().getY() - blockCenter.getY());
+        if (canReachDigStand(copper, stand) || (blockDist2 <= 6.25D && blockDy <= 2.0D)) {
             DiggerClaims.renew(this.ctx.pitId(golem), block, golem.data().id());
-        }
-        if (standDist2 > 1.69D) {
-            if (System.currentTimeMillis() - golem.data().lastActionAt() > 3000L) {
-                clearDigTarget(golem, block);
-                assignDigTarget(golem, copper, pit);
-                return;
-            }
-            this.ctx.walkTowards(copper, stand, golem);
+            digLog(golem, "move-reached start-dig " + blockPos(block)
+                    + " blockDist2=" + String.format("%.2f", blockDist2));
+            startDiggingBlock(golem, copper, block);
             return;
         }
-        copper.setVelocity(new Vector(0, 0, 0));
-        this.ctx.equipForBlock(copper, block.getType());
-        golem.diggerState(DiggerState.DIGGING);
-        GolemGaze.faceBlock(golem, block);
-        golem.mineTicksLeft(this.ctx.digDurationTicks(block.getType(), golem));
-        this.ctx.playDigFx(block);
+        UUID pitId = this.ctx.pitId(golem);
+        Long claimAge = DiggerClaims.claimAgeMs(pitId, block);
+        if (claimAge == null) {
+            takeClaim(pitId, block, golem.data().id());
+            claimAge = 0L;
+        }
+        if (claimAge >= 3_500L) {
+            if (DiggerSafety.hasSolidSupport(stand)) {
+                digLog(golem, "move-stuck teleport stand=" + locPos(stand)
+                        + " from=" + locPos(copper.getLocation())
+                        + " target=" + blockPos(block)
+                        + " claimAge=" + claimAge);
+                copper.setVelocity(new Vector(0, 0, 0));
+                copper.teleport(stand);
+                DiggerClaims.renew(pitId, block, golem.data().id());
+                startDiggingBlock(golem, copper, block);
+                return;
+            }
+            digLog(golem, "move-stuck give-up target=" + blockPos(block)
+                    + " claimAge=" + claimAge
+                    + " feet=" + locPos(copper.getLocation())
+                    + " stand=" + locPos(stand));
+            clearDigTarget(golem, block);
+            golem.diggerState(DiggerState.IDLE);
+            golem.data().lastActionAt(System.currentTimeMillis());
+            return;
+        }
+        if (copper.getLocation().getY() < stand.getY() - 1.4D) {
+            digLogThrottled(golem, "climb-" + blockPos(block), 1500L,
+                    "move-climb-up target=" + blockPos(block)
+                            + " feet=" + locPos(copper.getLocation())
+                            + " stand=" + locPos(stand)
+                            + " claimAge=" + claimAge);
+            this.ctx.movement().walkClimbStair(copper, stand, golem);
+            return;
+        }
+        digLogThrottled(golem, "walk-" + blockPos(block), 1500L,
+                "move-walk target=" + blockPos(block)
+                        + " type=" + block.getType()
+                        + " stand=" + locPos(stand)
+                        + " feet=" + locPos(copper.getLocation())
+                        + " dist2=" + String.format("%.2f", standDist2)
+                        + " blockDist2=" + String.format("%.2f", blockDist2)
+                        + " dy=" + String.format("%.2f", dy)
+                        + " claimAge=" + claimAge);
+        this.ctx.walkTowards(copper, stand, golem);
     }
 
     public void continueDig(ActiveGolem golem, CopperGolem copper) {
         Location target = golem.targetOre();
         if (target == null) {
+            digLog(golem, "dig-abort no target");
             golem.diggerState(DiggerState.IDLE);
             return;
         }
         SoulGolemData pit = this.ctx.pitData(golem);
         Block block = target.getBlock();
         if (golem.data().energy() <= 0) {
+            digLog(golem, "dig-abort no energy " + blockPos(block));
             clearDigTarget(golem, block);
             golem.diggerState(DiggerState.IDLE);
             return;
         }
-        if (!DiggerPit.isDiggable(block, pit, this.ctx.chestService(), this.ctx.farmAreaService(), this.ctx.digger())
-                || !DiggerPit.prepareDigFloor(block, this.ctx.digger())) {
+        if (!DiggerPit.isDiggable(block, pit, this.ctx.chestService(), this.ctx.farmAreaService(), this.ctx.digger())) {
+            digLog(golem, "dig-abort not-diggable " + blockPos(block)
+                    + " type=" + block.getType()
+                    + " why=" + whyNotDiggable(block, pit));
             clearDigTarget(golem, block);
             golem.diggerState(DiggerState.IDLE);
             return;
         }
+        DiggerPit.prepareDigFloor(block, this.ctx.digger());
         DiggerClaims.renew(this.ctx.pitId(golem), block, golem.data().id());
         this.ctx.equipForBlock(copper, block.getType());
-        long step = Math.max(1L, (long) (this.ctx.settings().coordinatorPeriodTicks * this.ctx.stickBoostFactor(golem)));
-        long left = golem.mineTicksLeft() - step;
+        long step = digStepTicks(golem);
+        long before = golem.mineTicksLeft();
+        long left = before - step;
         golem.mineTicksLeft(left);
         if (left > 0L) {
+            digLogThrottled(golem, "hit-" + blockPos(block), 1000L,
+                    "dig-hit " + blockPos(block) + " type=" + block.getType()
+                            + " left=" + before + "->" + left + " step=" + step
+                            + " boost=" + this.ctx.stickBoostFactor(golem));
             GolemGaze.faceBlock(golem, block);
             this.ctx.playDigFx(block);
             return;
@@ -333,8 +477,9 @@ public final class DiggerDigWork {
         int dugZ = block.getZ();
         Collection<ItemStack> drops = block.getDrops(this.ctx.digTool(block.getType()));
         this.ctx.playDigBurst(block);
-        DiggerPit.prepareDigFloor(block, this.ctx.digger());
+        digLog(golem, "dig-break " + blockPos(block) + " type=" + block.getType());
         block.setType(Material.AIR, false);
+        DiggerPit.prepareDigFloor(block, this.ctx.digger());
         DiggerPit.sealHazardsNear(block, this.ctx.digger().caveSafeDepth, DiggerPit.hazardSealMaterial(this.ctx.digger()));
         DiggerClaims.release(this.ctx.pitId(golem), block, golem.data().id());
         for (ItemStack drop : drops) {
@@ -406,7 +551,7 @@ public final class DiggerDigWork {
             return;
         }
         SoulGolemData pit = this.ctx.pitData(golem);
-        ensureDigProgress(pit);
+        ensureDigProgress(pit, this.ctx.digger(), this.ctx.farmAreaService());
         World world = Bukkit.getWorld(pit.worldName());
         if (world == null) {
             golem.diggerState(DiggerState.IDLE);
@@ -417,16 +562,59 @@ public final class DiggerDigWork {
                 golem.diggerState(DiggerState.IDLE);
                 return;
             }
-            int y = pit.digLayerY();
-            int stairIndex = pit.digStairIndex();
-            int used = DiggerPit.placeStair(world, pit, this.ctx.digger(), y, stairIndex);
-            if (used <= 0) {
-                golem.diggerState(DiggerState.IDLE);
-                golem.data().lastActionAt(System.currentTimeMillis());
+            if (isDepthDone(pit)) {
+                handlePitComplete(golem, copper, this.ctx.chestLink().isLinked(pit));
                 return;
             }
-            pit.digStairIndex(stairIndex + used);
+            int y = pit.digLayerY();
+            if (y - 1 < world.getMinHeight()) {
+                digLog(golem, "stair-stop bedrock-min layerY=" + y);
+                handlePitComplete(golem, copper, this.ctx.chestLink().isLinked(pit));
+                return;
+            }
+            int radiusForIndex = DiggerPit.radius(this.ctx.digger());
+            int stairIndex = DiggerPit.stairIndexForY(pit, radiusForIndex, y);
+            int[] cell = DiggerPit.stairCell(pit, radiusForIndex, stairIndex);
+            boolean corner = DiggerPit.isCornerStairIndex(pit, radiusForIndex, stairIndex);
+            int[] next = corner ? DiggerPit.stairCell(pit, radiusForIndex, stairIndex + 1) : cell;
+            digLog(golem, "stair-plan layerY=" + y
+                    + " index=" + stairIndex
+                    + " corner=" + corner
+                    + " support=" + cell[0] + "," + (y - 1) + "," + cell[1]
+                    + (corner
+                    ? " landing=" + cell[0] + "," + y + "," + cell[1]
+                    + " stair=" + next[0] + "," + y + "," + next[1]
+                    + " support2=" + next[0] + "," + (y - 1) + "," + next[1]
+                    : " stair=" + cell[0] + "," + y + "," + cell[1]));
+            int used = DiggerPit.placeStair(world, pit, this.ctx.digger(), y, stairIndex);
+            Block supportBlock = world.getBlockAt(cell[0], y - 1, cell[1]);
+            Block mainBlock = world.getBlockAt(cell[0], y, cell[1]);
+            Block nextBlock = world.getBlockAt(next[0], y, next[1]);
+            Block nextSupport = world.getBlockAt(next[0], y - 1, next[1]);
+            if (used <= 0) {
+                int before = pit.digLayerY();
+                ensureDigProgress(pit, this.ctx.digger(), this.ctx.farmAreaService());
+                if (pit.digLayerY() > before || layerHasDiggable(pit)) {
+                    digLog(golem, "stair-abort surface layerY=" + pit.digLayerY());
+                    golem.diggerState(DiggerState.IDLE);
+                    golem.data().lastActionAt(0L);
+                    return;
+                }
+                digLog(golem, "stair-fail layerY=" + y + " stair=" + stairIndex
+                        + " cell=" + cell[0] + "," + y + "," + cell[1]
+                        + " got=" + mainBlock.getType()
+                        + " descend anyway");
+            }
+            digLog(golem, "stair-placed used=" + used
+                    + " support@" + cell[0] + "," + (y - 1) + "," + cell[1] + "=" + supportBlock.getType()
+                    + (corner
+                    ? " landing@" + cell[0] + "," + y + "," + cell[1] + "=" + mainBlock.getType()
+                    + " stair@" + next[0] + "," + y + "," + next[1] + "=" + nextBlock.getType()
+                    + " support2@" + next[0] + "," + (y - 1) + "," + next[1] + "=" + nextSupport.getType()
+                    : " stair@" + cell[0] + "," + y + "," + cell[1] + "=" + mainBlock.getType())
+                    + " -> digLayerY " + y + "->" + (y - 1));
             pit.digLayerY(y - 1);
+            pit.digStairIndex(DiggerPit.stairIndexForY(pit, radiusForIndex, pit.digLayerY()));
             this.ctx.markPitDirty(golem);
 
             if (isDepthDone(pit)) {
@@ -466,10 +654,18 @@ public final class DiggerDigWork {
         if (stand == null) {
             return;
         }
+        if (needsLeaderAscent(golem, pit, this.ctx.digger(), copper.getLocation())) {
+            golem.diggerState(DiggerState.ESCAPING);
+            return;
+        }
         golem.diggerState(DiggerState.DONE);
         if (GolemMovement.horizontalDistanceSquared(copper.getLocation(), stand) > 2.25D
                 || Math.abs(copper.getLocation().getY() - stand.getY()) > 1.8D) {
-            this.ctx.walkTowards(copper, stand, golem);
+            if (copper.getLocation().getY() < stand.getY() - 1.0D) {
+                this.ctx.movement().walkClimbStair(copper, stand, golem);
+            } else {
+                this.ctx.walkTowards(copper, stand, golem);
+            }
             return;
         }
         this.ctx.movement().stop(copper);
@@ -506,6 +702,10 @@ public final class DiggerDigWork {
                 golem.diggerState(DiggerState.MOVING_TO_CHEST);
                 return;
             }
+        }
+        if (needsLeaderAscent(golem, pit, this.ctx.digger(), copper.getLocation())) {
+            golem.diggerState(DiggerState.ESCAPING);
+            return;
         }
         golem.diggerState(DiggerState.DONE);
         continueDone(golem, copper);
@@ -558,23 +758,31 @@ public final class DiggerDigWork {
         }
     }
 
-    private boolean layerHasDiggable(SoulGolemData pit) {
+    public static boolean layerHasDiggable(
+            SoulGolemData pit,
+            SoulChestService chestService,
+            FarmAreaService farmArea,
+            GolemSettings.Digger digger
+    ) {
         World world = Bukkit.getWorld(pit.worldName());
         if (world == null) {
             return false;
         }
-        int radius = DiggerPit.radius(this.ctx.digger());
+        int radius = DiggerPit.radius(digger);
         int y = pit.digLayerY();
         for (int z = DiggerPit.digMinZ(pit, radius); z <= DiggerPit.digMaxZ(pit, radius); z++) {
             for (int x = DiggerPit.digMinX(pit, radius); x <= DiggerPit.digMaxX(pit, radius); x++) {
                 Block block = world.getBlockAt(x, y, z);
-                if (DiggerPit.isDiggable(block, pit, this.ctx.chestService(), this.ctx.farmAreaService(), this.ctx.digger())
-                        && DiggerPit.prepareDigFloor(block, this.ctx.digger())) {
+                if (DiggerPit.isDiggable(block, pit, chestService, farmArea, digger)) {
                     return true;
                 }
             }
         }
         return false;
+    }
+
+    private boolean layerHasDiggable(SoulGolemData pit) {
+        return layerHasDiggable(pit, this.ctx.chestService(), this.ctx.farmAreaService(), this.ctx.digger());
     }
 
     private void placeCurrentLayerStair(ActiveGolem golem, SoulGolemData pit) {
@@ -584,37 +792,16 @@ public final class DiggerDigWork {
         }
         synchronized (("digger-stair-" + pit.id()).intern()) {
             int y = pit.digLayerY();
-            int stairIndex = pit.digStairIndex();
-            if (DiggerPit.placeStair(world, pit, this.ctx.digger(), y, stairIndex) > 0) {
+            int stairIndex = DiggerPit.stairIndexForY(pit, DiggerPit.radius(this.ctx.digger()), y);
+            int[] cell = DiggerPit.stairCell(pit, DiggerPit.radius(this.ctx.digger()), stairIndex);
+            int used = DiggerPit.placeStair(world, pit, this.ctx.digger(), y, stairIndex);
+            if (used > 0) {
+                digLog(golem, "stair-slot layerY=" + y
+                        + " index=" + stairIndex
+                        + " cell=" + cell[0] + "," + y + "," + cell[1]
+                        + " used=" + used);
                 this.ctx.markPitDirty(golem);
             }
-        }
-    }
-
-    private void ensureCurrentStairPlaced(ActiveGolem golem, SoulGolemData pit) {
-        World world = Bukkit.getWorld(pit.worldName());
-        if (world == null || !pit.hasDigProgress()) {
-            return;
-        }
-        int radius = DiggerPit.radius(this.ctx.digger());
-        int stairIndex = pit.digStairIndex();
-        int[] cell = DiggerPit.stairCell(pit, radius, stairIndex);
-        int y = pit.digLayerY();
-        Block at = world.getBlockAt(cell[0], y, cell[1]);
-        if (DiggerPit.isStairBlock(at)) {
-            return;
-        }
-        if (DiggerPit.isCornerStairIndex(pit, radius, stairIndex)) {
-            Material support = DiggerPit.stairSupportMaterial(this.ctx.digger());
-            int[] next = DiggerPit.stairCell(pit, radius, stairIndex + 1);
-            Block nextBlock = world.getBlockAt(next[0], y, next[1]);
-            if (at.getType() == support && DiggerPit.isStairBlock(nextBlock)) {
-                return;
-            }
-        }
-        if (at.getType().isAir()
-                || DiggerPit.isDiggable(at, pit, this.ctx.chestService(), this.ctx.farmAreaService(), this.ctx.digger())) {
-            placeCurrentLayerStair(golem, pit);
         }
     }
 
@@ -638,70 +825,80 @@ public final class DiggerDigWork {
             crewSize = Math.max(1, this.crew.crewSize(leaderId));
             myIndex = this.crew.crewIndex(golem);
         }
-        int stairIndex = pit.digStairIndex();
+        int stairIndex = DiggerPit.stairIndexForY(pit, radius, y);
         int[] stairCell = DiggerPit.stairCell(pit, radius, stairIndex);
         int[] stairWalk = DiggerPit.stairWalkCell(pit, radius, stairIndex);
         double ox = copper.getLocation().getX();
         double oz = copper.getLocation().getZ();
         int width = maxX - minX + 1;
+        Location lastTarget = golem.targetOre();
+        int lastX = lastTarget != null ? lastTarget.getBlockX() : Integer.MIN_VALUE;
+        int lastZ = lastTarget != null ? lastTarget.getBlockZ() : Integer.MIN_VALUE;
 
-        List<ScoredBlock> own = new ArrayList<>();
-        List<ScoredBlock> shared = new ArrayList<>();
-        int caveSafeDepth = Math.max(1, this.ctx.digger().caveSafeDepth);
+        List<ScoredBlock> candidates = new ArrayList<>();
+        int skippedClaim = 0;
         for (int z = minZ; z <= maxZ; z++) {
             for (int x = minX; x <= maxX; x++) {
                 Block block = world.getBlockAt(x, y, z);
                 if (!DiggerPit.isDiggable(block, pit, this.ctx.chestService(), this.ctx.farmAreaService(), this.ctx.digger())) {
                     continue;
                 }
-                if (DiggerPit.hasCaveBelow(block, caveSafeDepth)) {
-                    continue;
-                }
                 double dx = (x + 0.5D) - ox;
                 double dz = (z + 0.5D) - oz;
                 double myDist2 = dx * dx + dz * dz;
-                if (!canTakeClaim(pitId, block, diggerId, myDist2)) {
+                if (!canTakeClaim(pitId, block, diggerId)) {
+                    skippedClaim++;
                     continue;
                 }
                 int cellIndex = (z - minZ) * width + (x - minX);
-                boolean mine = Math.floorMod(cellIndex, crewSize) == myIndex;
                 boolean stairSlot = (x == stairCell[0] && z == stairCell[1])
                         || (x == stairWalk[0] && z == stairWalk[1]);
-                long score = (long) myDist2;
+                long score = (long) (myDist2 * 100.0D);
                 if (stairSlot) {
-                    score -= 1_000_000L;
+                    score -= 50_000L;
                 }
-                (mine ? own : shared).add(new ScoredBlock(block, score, myDist2));
+                if (Math.floorMod(cellIndex, crewSize) == myIndex) {
+                    score -= 500L;
+                }
+                if (lastX != Integer.MIN_VALUE && Math.abs(x - lastX) + Math.abs(z - lastZ) <= 1) {
+                    score -= 800L;
+                }
+                candidates.add(new ScoredBlock(block, score, myDist2));
             }
         }
-        own.sort(Comparator.comparingLong(ScoredBlock::score));
-        shared.sort(Comparator.comparingLong(ScoredBlock::score));
-        Block claimed = claimFirst(own, pitId, diggerId);
-        if (claimed != null) {
-            return claimed;
-        }
-        return claimFirst(shared, pitId, diggerId);
+        candidates.sort(Comparator.comparingLong(ScoredBlock::score));
+        digLogThrottled(golem, "find-" + y, 2000L,
+                "find-layer y=" + y
+                        + " candidates=" + candidates.size()
+                        + " claimBusy=" + skippedClaim
+                        + " crew=" + myIndex + "/" + crewSize
+                        + " stairCell=" + stairCell[0] + "," + stairCell[1]
+                        + " topCandidate=" + (candidates.isEmpty()
+                        ? "none"
+                        : blockPos(candidates.get(0).block()) + ":" + candidates.get(0).block().getType()));
+        return claimFirst(candidates, pitId, diggerId);
     }
 
-    private boolean canTakeClaim(UUID pitId, Block block, UUID diggerId, double myDist2) {
+    private boolean canTakeClaim(UUID pitId, Block block, UUID diggerId) {
         UUID ownerId = DiggerClaims.owner(pitId, block);
         if (ownerId == null || ownerId.equals(diggerId)) {
             return true;
         }
         ActiveGolem owner = this.ctx.registry().byId(ownerId).orElse(null);
-        if (owner == null || !isActivelyWorkingBlock(owner, block)) {
+        if (owner == null) {
+            DiggerClaims.forceRelease(pitId, block);
             return true;
         }
-        if (owner.diggerState() == DiggerState.DIGGING) {
+        if (isWorkingBlock(owner, block)) {
             return false;
         }
-        double ox = owner.data().x() - (block.getX() + 0.5D);
-        double oz = owner.data().z() - (block.getZ() + 0.5D);
-        double theirDist2 = ox * ox + oz * oz;
-        return myDist2 + 0.75D < theirDist2;
+        digLog(owner, "claim-steal by=" + shortId(diggerId) + " " + blockPos(block)
+                + " ownerState=" + owner.diggerState());
+        transferBlockTask(pitId, owner, block);
+        return true;
     }
 
-    private static boolean isActivelyWorkingBlock(ActiveGolem owner, Block block) {
+    private boolean isWorkingBlock(ActiveGolem owner, Block block) {
         if (owner.data().energy() <= 0 || owner.fetchingFeed()) {
             return false;
         }
@@ -710,18 +907,96 @@ public final class DiggerDigWork {
             return false;
         }
         Location target = owner.targetOre();
-        return target != null
-                && target.getBlockX() == block.getX()
-                && target.getBlockY() == block.getY()
-                && target.getBlockZ() == block.getZ();
+        if (target == null
+                || target.getBlockX() != block.getX()
+                || target.getBlockY() != block.getY()
+                || target.getBlockZ() != block.getZ()) {
+            return false;
+        }
+        if (state == DiggerState.MOVING_TO_DIG) {
+            Long age = DiggerClaims.claimAgeMs(this.ctx.pitId(owner), block);
+            return age != null && age < 4_000L;
+        }
+        return isBreakingBlock(owner, block);
+    }
+
+    private boolean isBreakingBlock(ActiveGolem owner, Block block) {
+        if (owner.data().energy() <= 0 || owner.fetchingFeed()) {
+            return false;
+        }
+        if (owner.diggerState() != DiggerState.DIGGING) {
+            return false;
+        }
+        Location target = owner.targetOre();
+        if (target == null
+                || target.getBlockX() != block.getX()
+                || target.getBlockY() != block.getY()
+                || target.getBlockZ() != block.getZ()) {
+            return false;
+        }
+        double ox = owner.data().x() - (block.getX() + 0.5D);
+        double oz = owner.data().z() - (block.getZ() + 0.5D);
+        return ox * ox + oz * oz <= 9.0D;
+    }
+
+    private void transferBlockTask(UUID pitId, ActiveGolem owner, Block block) {
+        DiggerClaims.forceRelease(pitId, block);
+        Location target = owner.targetOre();
+        if (target == null
+                || target.getBlockX() != block.getX()
+                || target.getBlockY() != block.getY()
+                || target.getBlockZ() != block.getZ()) {
+            return;
+        }
+        digLog(owner, "claim-lost " + blockPos(block) + " state=" + owner.diggerState());
+        owner.targetOre(null);
+        owner.oreMaterial(null);
+        owner.wanderTarget(null);
+        if (owner.diggerState() == DiggerState.MOVING_TO_DIG || owner.diggerState() == DiggerState.DIGGING) {
+            owner.diggerState(DiggerState.IDLE);
+        }
+        owner.data().lastActionAt(0L);
+    }
+
+    private void releaseAbandonedClaims(UUID pitId, SoulGolemData pit) {
+        World world = Bukkit.getWorld(pit.worldName());
+        if (world == null) {
+            return;
+        }
+        int radius = DiggerPit.radius(this.ctx.digger());
+        int y = pit.digLayerY();
+        for (int z = DiggerPit.digMinZ(pit, radius); z <= DiggerPit.digMaxZ(pit, radius); z++) {
+            for (int x = DiggerPit.digMinX(pit, radius); x <= DiggerPit.digMaxX(pit, radius); x++) {
+                Block block = world.getBlockAt(x, y, z);
+                if (!DiggerPit.isDiggable(block, pit, this.ctx.chestService(), this.ctx.farmAreaService(), this.ctx.digger())) {
+                    continue;
+                }
+                UUID ownerId = DiggerClaims.owner(pitId, block);
+                if (ownerId == null) {
+                    continue;
+                }
+                ActiveGolem owner = this.ctx.registry().byId(ownerId).orElse(null);
+                if (owner == null) {
+                    DiggerClaims.forceRelease(pitId, block);
+                    continue;
+                }
+                if (isWorkingBlock(owner, block)) {
+                    continue;
+                }
+                Long age = DiggerClaims.claimAgeMs(pitId, block);
+                if (age != null && age < 8_000L) {
+                    continue;
+                }
+                digLog(owner, "claim-abandon " + blockPos(block) + " age=" + age + " state=" + owner.diggerState());
+                transferBlockTask(pitId, owner, block);
+            }
+        }
     }
 
     private Block claimFirst(List<ScoredBlock> candidates, UUID pitId, UUID diggerId) {
         for (ScoredBlock scored : candidates) {
-            if (!DiggerPit.prepareDigFloor(scored.block(), this.ctx.digger())) {
-                continue;
-            }
-            if (!canTakeClaim(pitId, scored.block(), diggerId, scored.dist2())) {
+            DiggerPit.prepareDigFloor(scored.block(), this.ctx.digger());
+            if (!canTakeClaim(pitId, scored.block(), diggerId)) {
                 continue;
             }
             takeClaim(pitId, scored.block(), diggerId);
@@ -730,29 +1005,233 @@ public final class DiggerDigWork {
         return null;
     }
 
+    private void forceReleaseLayerClaims(UUID pitId, SoulGolemData pit) {
+        World world = Bukkit.getWorld(pit.worldName());
+        if (world == null) {
+            return;
+        }
+        int radius = DiggerPit.radius(this.ctx.digger());
+        int y = pit.digLayerY();
+        for (int z = DiggerPit.digMinZ(pit, radius); z <= DiggerPit.digMaxZ(pit, radius); z++) {
+            for (int x = DiggerPit.digMinX(pit, radius); x <= DiggerPit.digMaxX(pit, radius); x++) {
+                Block block = world.getBlockAt(x, y, z);
+                UUID ownerId = DiggerClaims.owner(pitId, block);
+                if (ownerId == null) {
+                    continue;
+                }
+                ActiveGolem owner = this.ctx.registry().byId(ownerId).orElse(null);
+                if (owner == null) {
+                    DiggerClaims.forceRelease(pitId, block);
+                    continue;
+                }
+                Long age = DiggerClaims.claimAgeMs(pitId, block);
+                if (isWorkingBlock(owner, block) && (age == null || age < 4_000L)) {
+                    continue;
+                }
+                digLog(owner, "claim-force " + blockPos(block) + " age=" + age
+                        + " ownerState=" + owner.diggerState());
+                transferBlockTask(pitId, owner, block);
+            }
+        }
+    }
+
     private void takeClaim(UUID pitId, Block block, UUID diggerId) {
         UUID previous = DiggerClaims.claim(pitId, block, diggerId);
         if (previous == null || previous.equals(diggerId)) {
             return;
         }
-        this.ctx.registry().byId(previous).ifPresent(other -> {
-            Location target = other.targetOre();
-            if (target == null
-                    || target.getBlockX() != block.getX()
-                    || target.getBlockY() != block.getY()
-                    || target.getBlockZ() != block.getZ()) {
-                return;
-            }
-            other.targetOre(null);
-            other.oreMaterial(null);
-            other.wanderTarget(null);
-            if (other.diggerState() == DiggerState.MOVING_TO_DIG || other.diggerState() == DiggerState.DIGGING) {
-                other.diggerState(DiggerState.IDLE);
-            }
-        });
+        this.ctx.registry().byId(previous).ifPresent(other -> transferBlockTask(pitId, other, block));
     }
 
     private record ScoredBlock(Block block, long score, double dist2) {
+    }
+
+    private long digStepTicks(ActiveGolem golem) {
+        return Math.max(1L, this.ctx.settings().coordinatorPeriodTicks);
+    }
+
+    private static boolean canReachDigStand(CopperGolem copper, Location stand) {
+        if (stand == null) {
+            return false;
+        }
+        double standDist2 = GolemMovement.horizontalDistanceSquared(copper.getLocation(), stand);
+        return standDist2 <= 1.69D && Math.abs(copper.getLocation().getY() - stand.getY()) <= 1.6D;
+    }
+
+    private void startDiggingBlock(ActiveGolem golem, CopperGolem copper, Block block) {
+        copper.setVelocity(new Vector(0, 0, 0));
+        this.ctx.equipForBlock(copper, block.getType());
+        golem.diggerState(DiggerState.DIGGING);
+        GolemGaze.faceBlock(golem, block);
+        long duration = this.ctx.digDurationTicks(block.getType(), golem);
+        golem.mineTicksLeft(duration);
+        digLog(golem, "dig-start " + blockPos(block) + " type=" + block.getType()
+                + " duration=" + duration + " boost=" + this.ctx.stickBoostFactor(golem));
+        this.ctx.playDigFx(block);
+    }
+
+    public void logTick(ActiveGolem golem, String message) {
+        digLogThrottled(golem, "tick-" + message, 2000L, message);
+    }
+
+    private void digLog(ActiveGolem golem, String message) {
+        if (!this.ctx.digger().digDebugLogs) {
+            return;
+        }
+        Logger log = this.ctx.plugin().getLogger();
+        if (golem == null) {
+            log.info("[dig] ? " + message);
+            return;
+        }
+        String name = golem.data().isCrewHelper() ? "helper" : "leader";
+        log.info("[dig] " + name + "/" + shortId(golem.data().id()) + " " + message);
+    }
+
+    private void digLogThrottled(ActiveGolem golem, String key, long intervalMs, String message) {
+        if (!this.ctx.digger().digDebugLogs) {
+            return;
+        }
+        String fullKey = (golem == null ? "?" : golem.data().id()) + ":" + key;
+        long now = System.currentTimeMillis();
+        Long prev = this.logThrottle.get(fullKey);
+        if (prev != null && now - prev < intervalMs) {
+            return;
+        }
+        this.logThrottle.put(fullKey, now);
+        digLog(golem, message);
+    }
+
+    private static String shortId(UUID id) {
+        if (id == null) {
+            return "?";
+        }
+        return id.toString().substring(0, 8);
+    }
+
+    private static String blockPos(Block block) {
+        return block.getX() + "," + block.getY() + "," + block.getZ();
+    }
+
+    private static String locPos(Location loc) {
+        if (loc == null) {
+            return "null";
+        }
+        return String.format("%.1f,%.1f,%.1f", loc.getX(), loc.getY(), loc.getZ());
+    }
+
+    private String whyNotDiggable(Block block, SoulGolemData pit) {
+        if (block == null) {
+            return "null-block";
+        }
+        if (DiggerPit.isProtected(block, pit, this.ctx.chestService())) {
+            return "protected:" + block.getType();
+        }
+        if (DiggerPit.isStairStructureBlock(block, pit, this.ctx.digger())) {
+            return "stair-structure:" + block.getType();
+        }
+        int radius = DiggerPit.radius(this.ctx.digger());
+        int x = block.getX();
+        int y = block.getY();
+        int z = block.getZ();
+        if (!DiggerPit.isInsidePit(pit, x, z, radius)) {
+            return "outside-pit";
+        }
+        if (pit.hasDigProgress()) {
+            if (y != pit.digLayerY()) {
+                return "wrong-layer y=" + y + " need=" + pit.digLayerY();
+            }
+            if (y > pit.digStartY()) {
+                return "above-start y=" + y + " start=" + pit.digStartY();
+            }
+        }
+        if (DiggerPit.isBorderColumn(pit, x, z, radius)) {
+            return "border-column";
+        }
+        if (DiggerPit.isStationColumn(pit, x, z)) {
+            return "station-column";
+        }
+        Material type = block.getType();
+        if (this.ctx.farmAreaService().isBorderMaterial(type)) {
+            return "border-material:" + type;
+        }
+        if (FarmAreaService.isFoliage(type) || FarmAreaService.isVegetation(type) || type == Material.SNOW) {
+            return "ok-foliage";
+        }
+        if (!type.isSolid()) {
+            return "not-solid:" + type;
+        }
+        return "unknown:" + type;
+    }
+
+    private LayerScan scanLayer(SoulGolemData pit, UUID pitId, UUID diggerId) {
+        LayerScan scan = new LayerScan();
+        World world = Bukkit.getWorld(pit.worldName());
+        if (world == null || !pit.hasDigProgress()) {
+            scan.sampleWhy = "no-world-or-progress";
+            return scan;
+        }
+        int radius = DiggerPit.radius(this.ctx.digger());
+        int y = pit.digLayerY();
+        StringBuilder samples = new StringBuilder();
+        int samplesLeft = 4;
+        for (int z = DiggerPit.digMinZ(pit, radius); z <= DiggerPit.digMaxZ(pit, radius); z++) {
+            for (int x = DiggerPit.digMinX(pit, radius); x <= DiggerPit.digMaxX(pit, radius); x++) {
+                scan.cells++;
+                Block block = world.getBlockAt(x, y, z);
+                Material type = block.getType();
+                if (type.isAir()) {
+                    scan.air++;
+                    continue;
+                }
+                if (DiggerPit.isDiggable(block, pit, this.ctx.chestService(), this.ctx.farmAreaService(), this.ctx.digger())) {
+                    scan.diggable++;
+                    UUID owner = DiggerClaims.owner(pitId, block);
+                    if (owner != null && !owner.equals(diggerId)) {
+                        ActiveGolem other = this.ctx.registry().byId(owner).orElse(null);
+                        if (other != null && isWorkingBlock(other, block)) {
+                            scan.claimedBusy++;
+                        } else {
+                            scan.claimedStale++;
+                        }
+                    } else {
+                        scan.free++;
+                    }
+                    continue;
+                }
+                scan.blocked++;
+                if (samplesLeft > 0) {
+                    if (!samples.isEmpty()) {
+                        samples.append(" | ");
+                    }
+                    samples.append(blockPos(block)).append('=').append(type)
+                            .append('(').append(whyNotDiggable(block, pit)).append(')');
+                    samplesLeft--;
+                }
+            }
+        }
+        scan.sampleWhy = samples.isEmpty() ? "-" : samples.toString();
+        return scan;
+    }
+
+    private static final class LayerScan {
+        int cells;
+        int air;
+        int diggable;
+        int free;
+        int claimedBusy;
+        int claimedStale;
+        int blocked;
+        String sampleWhy = "-";
+
+        String summary() {
+            return "cells=" + this.cells
+                    + " air=" + this.air
+                    + " diggable=" + this.diggable
+                    + " free=" + this.free
+                    + " claimBusy=" + this.claimedBusy
+                    + " claimStale=" + this.claimedStale
+                    + " blocked=" + this.blocked;
+        }
     }
 
     private Location stableStandForDig(ActiveGolem golem, CopperGolem copper, Block block, SoulGolemData pit) {
@@ -760,11 +1239,20 @@ public final class DiggerDigWork {
         if (cached != null
                 && cached.getWorld() != null
                 && cached.getWorld().equals(block.getWorld())
+                && !isStandOnStair(cached)
                 && DiggerSafety.hasSolidSupport(cached)
                 && GolemMovement.horizontalDistanceSquared(cached, block.getLocation().add(0.5D, 1.0D, 0.5D)) <= 6.25D) {
             return cached;
         }
         return standForDig(block, pit, copper.getLocation());
+    }
+
+    private static boolean isStandOnStair(Location stand) {
+        if (stand == null || stand.getWorld() == null) {
+            return false;
+        }
+        Block below = stand.getBlock().getRelative(BlockFace.DOWN);
+        return org.bukkit.Tag.STAIRS.isTagged(below.getType());
     }
 
     private Location standForDig(Block block, SoulGolemData pit, Location from) {
@@ -773,12 +1261,6 @@ public final class DiggerDigWork {
         double hz = block.getZ() + 0.5D;
         double fx = from != null ? from.getX() : hx;
         double fz = from != null ? from.getZ() : hz;
-        if (DiggerPit.isCurrentStairSlot(pit, this.ctx.digger(), block.getX(), block.getY(), block.getZ())) {
-            Location inward = DiggerPit.stairStandInward(world, pit, new int[]{block.getX(), block.getZ()}, block.getY());
-            if (DiggerSafety.hasSolidSupport(inward) || DiggerPit.isStairBlock(block)) {
-                return inward;
-            }
-        }
         int[][] offsets = {{0, 0}, {1, 0}, {-1, 0}, {0, 1}, {0, -1}, {1, 1}, {1, -1}, {-1, 1}, {-1, -1}};
         Location best = null;
         double bestScore = Double.MAX_VALUE;
@@ -804,13 +1286,7 @@ public final class DiggerDigWork {
             double toGolem = Math.abs(stand.getX() - fx) + Math.abs(stand.getZ() - fz);
             double score = toBlock + toGolem * 0.35D;
             if (org.bukkit.Tag.STAIRS.isTagged(below.getType())) {
-                stand = DiggerPit.stairStandInward(
-                        world,
-                        pit,
-                        new int[]{below.getX(), below.getZ()},
-                        below.getY()
-                );
-                score -= 0.4D;
+                continue;
             }
             if (score < bestScore) {
                 bestScore = score;
@@ -828,30 +1304,77 @@ public final class DiggerDigWork {
     }
 
     public static void ensureDigProgress(SoulGolemData data) {
-        if (data.hasDigProgress()) {
+        ensureDigProgress(data, new GolemSettings.Digger(), null);
+    }
+
+    public static void ensureDigProgress(
+            SoulGolemData data,
+            GolemSettings.Digger digger,
+            FarmAreaService farmArea
+    ) {
+        if (data == null || digger == null) {
             return;
         }
-        int floorY = (int) Math.floor(data.homeY());
-        data.digStartY(floorY);
-        data.digLayerY(floorY);
-        data.digStairIndex(0);
+        int surface = DiggerPit.findHighestPitFillY(data, digger, farmArea);
+        if (!data.hasDigProgress()) {
+            data.digStartY(surface);
+            data.digLayerY(surface);
+            data.digStairIndex(0);
+            return;
+        }
+        int above = DiggerPit.findHighestPitFillAbove(data, digger, farmArea, data.digLayerY());
+        if (above > data.digLayerY()) {
+            data.digStartY(Math.max(data.digStartY(), above));
+            data.digLayerY(above);
+        }
+        int canonical = DiggerPit.stairIndexForY(data, DiggerPit.radius(digger), data.digLayerY());
+        if (data.digStairIndex() != canonical) {
+            data.digStairIndex(canonical);
+        }
     }
 
     private boolean isDepthDone(SoulGolemData data) {
-        return isPitComplete(data, this.ctx.digger().maxDepth);
+        return isPitComplete(data, this.ctx.digger());
+    }
+
+    public static boolean isPitComplete(SoulGolemData data, GolemSettings.Digger digger) {
+        if (data == null || !data.hasDigProgress() || digger == null) {
+            return false;
+        }
+        World world = Bukkit.getWorld(data.worldName());
+        if (world == null) {
+            return false;
+        }
+        if (data.digLayerY() <= world.getMinHeight()) {
+            return true;
+        }
+        if (DiggerPit.isBedrockFloorLayer(data, world, DiggerPit.radius(digger))) {
+            return true;
+        }
+        if (digger.maxDepth > 0 && data.digStartY() - data.digLayerY() >= digger.maxDepth) {
+            return true;
+        }
+        return false;
     }
 
     public static boolean isPitComplete(SoulGolemData data, int maxDepth) {
-        if (data == null || !data.hasDigProgress()) {
-            return false;
-        }
-        return data.digStartY() - data.digLayerY() >= Math.max(1, maxDepth);
+        GolemSettings.Digger digger = new GolemSettings.Digger();
+        digger.maxDepth = maxDepth;
+        return isPitComplete(data, digger);
     }
 
-    public static boolean isCrewReturning(ActiveGolem golem, SoulGolemData pit, int maxDepth) {
+    public static boolean isCrewReturning(ActiveGolem golem, SoulGolemData pit, GolemSettings.Digger digger) {
         return golem != null
                 && golem.data().isCrewHelper()
-                && (golem.crewReturning() || isPitComplete(pit, maxDepth));
+                && (golem.crewReturning() || isPitComplete(pit, digger));
+    }
+
+    public static boolean needsLeaderAscent(ActiveGolem golem, SoulGolemData pit, GolemSettings.Digger digger, Location feet) {
+        return golem != null
+                && feet != null
+                && !golem.data().isCrewHelper()
+                && isPitComplete(pit, digger)
+                && feet.getY() < pit.homeY() - 1.4D;
     }
 
     static int carriedCount(ActiveGolem golem) {

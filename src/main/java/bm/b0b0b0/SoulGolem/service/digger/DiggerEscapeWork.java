@@ -14,6 +14,10 @@ import org.bukkit.entity.CopperGolem;
 
 public final class DiggerEscapeWork {
 
+    private static final double ON_STEP_H_SQ = 1.21D;
+    private static final double ON_STEP_Y = 0.55D;
+    private static final long CLIMB_HOP_MS = 2_000L;
+
     private final DiggerContext ctx;
 
     public DiggerEscapeWork(DiggerContext ctx) {
@@ -23,7 +27,7 @@ public final class DiggerEscapeWork {
     public boolean wantsSurface(ActiveGolem golem) {
         DiggerState state = golem.diggerState();
         SoulGolemData pit = this.ctx.pitData(golem);
-        boolean crewReturn = DiggerDigWork.isCrewReturning(golem, pit, this.ctx.digger().maxDepth);
+        boolean crewReturn = DiggerDigWork.isCrewReturning(golem, pit, this.ctx.digger());
         return switch (state) {
             case MOVING_TO_CHEST, WAITING_CHEST, ESCAPING, DONE, RESTING -> true;
             case IDLE -> crewReturn
@@ -41,8 +45,14 @@ public final class DiggerEscapeWork {
             return false;
         }
         SoulGolemData pit = this.ctx.pitData(golem);
-        boolean crewReturn = DiggerDigWork.isCrewReturning(golem, pit, this.ctx.digger().maxDepth);
-        if (this.ctx.chestLink().isLinked(pit) && !crewReturn) {
+        boolean crewReturn = DiggerDigWork.isCrewReturning(golem, pit, this.ctx.digger());
+        boolean leaderAscent = DiggerDigWork.needsLeaderAscent(
+                golem,
+                pit,
+                this.ctx.digger(),
+                copper.getLocation()
+        );
+        if (this.ctx.chestLink().isLinked(pit) && !crewReturn && !leaderAscent) {
             return false;
         }
         if (copper.getLocation().getY() >= pit.homeY() - 1.4D) {
@@ -60,6 +70,7 @@ public final class DiggerEscapeWork {
         golem.clearPathWaypoint();
         golem.wanderTarget(null);
         golem.targetOre(null);
+        golem.fenceStuckTicks(0L);
         golem.diggerState(DiggerState.ESCAPING);
         golem.data().lastActionAt(System.currentTimeMillis());
     }
@@ -73,12 +84,17 @@ public final class DiggerEscapeWork {
         }
         GolemSettings.Digger digger = this.ctx.digger();
         int topY = (int) Math.floor(pit.homeY());
-        double feetY = copper.getLocation().getY();
-        int bottomY = Math.min(copper.getLocation().getBlockY(), pit.hasDigProgress() ? pit.digLayerY() : topY);
+        Location from = copper.getLocation();
+        double feetY = from.getY();
 
         synchronized (("digger-stair-" + pit.id()).intern()) {
-            DiggerDigWork.ensureDigProgress(pit);
-            DiggerPit.ensureSpiralStairs(world, pit, digger, bottomY);
+            DiggerDigWork.ensureDigProgress(pit, this.ctx.digger(), this.ctx.farmAreaService());
+            DiggerPit.ensureSpiralStairs(
+                    world,
+                    pit,
+                    digger,
+                    Math.min(from.getBlockY(), pit.hasDigProgress() ? pit.digLayerY() : topY)
+            );
             this.ctx.markPitDirty(golem);
         }
 
@@ -87,46 +103,56 @@ public final class DiggerEscapeWork {
             return;
         }
 
-        Location step = nearestClimbStep(world, pit, digger, copper.getLocation(), topY);
+        Location step = nextClimbStep(world, pit, digger, from, topY);
         if (step == null) {
             Location chest = this.ctx.chestService().chestStandLocation(pit);
             if (chest != null) {
-                this.ctx.walkTowards(copper, chest, golem);
+                this.ctx.movement().walkClimbStair(copper, chest, golem);
             }
-            if (System.currentTimeMillis() - golem.data().lastActionAt() > 8000L) {
+            if (System.currentTimeMillis() - golem.data().lastActionAt() > 5_000L) {
                 finishEscape(golem);
             }
             return;
         }
 
-        if (GolemMovement.horizontalDistanceSquared(copper.getLocation(), step) <= 1.0D
-                && Math.abs(copper.getLocation().getY() - step.getY()) <= 1.25D) {
-            golem.data().lastActionAt(System.currentTimeMillis());
-            Location next = nearestClimbStep(world, pit, digger, step.clone().add(0, 0.1D, 0), topY);
-            if (next != null && next.getY() > copper.getLocation().getY() + 0.2D) {
-                this.ctx.walkTowards(copper, next, golem);
-            } else if (copper.getLocation().getY() >= topY - 0.2D) {
+        double h2 = GolemMovement.horizontalDistanceSquared(from, step);
+        double yDiff = Math.abs(feetY - step.getY());
+        if (h2 <= ON_STEP_H_SQ && yDiff <= ON_STEP_Y) {
+            golem.fenceStuckTicks(0L);
+            Location above = nextClimbStep(world, pit, digger, step.clone().add(0.0D, 0.15D, 0.0D), topY);
+            if (above != null && above.getY() > step.getY() + 0.08D) {
+                this.ctx.movement().walkClimbStair(copper, above, golem);
+            } else if (feetY >= topY - 0.2D) {
                 finishEscape(golem);
-            } else {
-                this.ctx.walkTowards(copper, step, golem);
             }
+            golem.data().lastActionAt(System.currentTimeMillis());
             return;
         }
 
-        this.ctx.walkTowards(copper, step, golem);
-        if (System.currentTimeMillis() - golem.data().lastActionAt() > 6000L) {
+        long tickMs = Math.max(50L, this.ctx.settings().coordinatorPeriodTicks * 50L);
+        long stuck = golem.fenceStuckTicks() + tickMs;
+        golem.fenceStuckTicks(stuck);
+        if (stuck >= CLIMB_HOP_MS && h2 <= 6.25D) {
+            copper.teleport(step);
+            golem.fenceStuckTicks(0L);
             golem.data().lastActionAt(System.currentTimeMillis());
-            Location alt = nearestClimbStep(world, pit, digger, copper.getLocation().add(0.01D, 0, 0.01D), topY);
-            if (alt != null) {
-                this.ctx.walkTowards(copper, alt, golem);
-            }
+            return;
         }
+
+        this.ctx.movement().walkClimbStair(copper, step, golem);
+        golem.data().lastActionAt(System.currentTimeMillis());
     }
 
     private void finishEscape(ActiveGolem golem) {
+        golem.fenceStuckTicks(0L);
         SoulGolemData pit = this.ctx.pitData(golem);
-        if (DiggerDigWork.isCrewReturning(golem, pit, this.ctx.digger().maxDepth)) {
+        if (DiggerDigWork.isCrewReturning(golem, pit, this.ctx.digger())) {
             golem.diggerState(DiggerState.MOVING_TO_CHEST);
+            golem.data().lastActionAt(System.currentTimeMillis());
+            return;
+        }
+        if (!golem.data().isCrewHelper() && DiggerDigWork.isPitComplete(pit, this.ctx.digger())) {
+            golem.diggerState(DiggerState.DONE);
             golem.data().lastActionAt(System.currentTimeMillis());
             return;
         }
@@ -144,7 +170,7 @@ public final class DiggerEscapeWork {
                 || golem.fetchingWeapon();
     }
 
-    private Location nearestClimbStep(
+    private Location nextClimbStep(
             World world,
             SoulGolemData pit,
             GolemSettings.Digger digger,
@@ -155,52 +181,75 @@ public final class DiggerEscapeWork {
             return this.ctx.chestService().chestStandLocation(pit);
         }
         int radius = DiggerPit.radius(digger);
-        int startY = pit.digStartY();
-        double fromY = from.getY();
-        Location bestNear = null;
-        double bestNearDist = Double.MAX_VALUE;
-        Location bestUp = null;
-        double bestUpDist = Double.MAX_VALUE;
-
-        for (int y = pit.digLayerY(); y <= topY; y++) {
-            int stairIndex = DiggerPit.stairIndexForY(pit, radius, y);
-            int[] cell = DiggerPit.stairCell(pit, radius, stairIndex);
-            int[] walk = DiggerPit.stairWalkCell(pit, radius, stairIndex);
-            Block stair = world.getBlockAt(walk[0], y, walk[1]);
-            if (!DiggerPit.isStairBlock(stair) && y <= startY) {
-                DiggerPit.placeStair(world, pit, digger, y, stairIndex);
-                stair = world.getBlockAt(walk[0], y, walk[1]);
-            }
-            Block landing = world.getBlockAt(cell[0], y, cell[1]);
-            if (!DiggerPit.isStairBlock(stair)
-                    && !landing.getType().isSolid()
-                    && !DiggerSafety.hasSolidSupport(
-                    new Location(world, walk[0] + 0.5D, y + 1.0D, walk[1] + 0.5D))) {
+        double feetY = from.getY();
+        int minFloor = Math.max(pit.digLayerY(), (int) Math.floor(feetY) - 2);
+        Location walkTarget = null;
+        for (int floor = minFloor; floor <= topY; floor++) {
+            int stairIndex = DiggerPit.stairIndexForY(pit, radius, floor);
+            Location stand = stairStandAt(world, pit, digger, floor, stairIndex);
+            if (stand == null || stand.getY() < feetY - 0.75D) {
                 continue;
             }
-            Location stand = DiggerPit.stairStandInward(world, pit, walk, y);
-            double dy = stand.getY() - fromY;
-            double dist2 = GolemMovement.horizontalDistanceSquared(from, stand);
-            if (dy < -0.6D) {
-                continue;
-            }
-            if (dy <= 1.35D) {
-                if (dist2 < bestNearDist) {
-                    bestNearDist = dist2;
-                    bestNear = stand;
+            double h2 = GolemMovement.horizontalDistanceSquared(from, stand);
+            double yDiff = Math.abs(feetY - stand.getY());
+            boolean onStep = h2 <= ON_STEP_H_SQ && yDiff <= ON_STEP_Y;
+            if (onStep && floor < topY) {
+                int nextFloor = floor + 1;
+                int nextIndex = DiggerPit.stairIndexForY(pit, radius, nextFloor);
+                Location above = stairStandAt(world, pit, digger, nextFloor, nextIndex);
+                if (above != null && above.getY() > stand.getY() + 0.05D) {
+                    return above;
                 }
-            } else if (dist2 < bestUpDist) {
-                bestUpDist = dist2;
-                bestUp = stand;
+            }
+            if (!onStep) {
+                walkTarget = stand;
+                break;
+            }
+            if (floor == topY) {
+                return stand;
             }
         }
-        if (bestNear != null) {
-            return bestNear;
-        }
-        if (bestUp != null) {
-            return bestUp;
+        if (walkTarget != null) {
+            return walkTarget;
         }
         return this.ctx.chestService().chestStandLocation(pit);
+    }
+
+    private Location stairStandAt(
+            World world,
+            SoulGolemData pit,
+            GolemSettings.Digger digger,
+            int floorY,
+            int stairIndex
+    ) {
+        ensureStairAt(world, pit, digger, floorY, stairIndex);
+        int radius = DiggerPit.radius(digger);
+        int[] walk = DiggerPit.stairWalkCell(pit, radius, stairIndex);
+        Block stair = world.getBlockAt(walk[0], floorY, walk[1]);
+        int[] landingCell = DiggerPit.stairCell(pit, radius, stairIndex);
+        Block landing = world.getBlockAt(landingCell[0], floorY, landingCell[1]);
+        if (!DiggerPit.isStairBlock(stair)
+                && !landing.getType().isSolid()
+                && !DiggerSafety.hasSolidSupport(
+                new Location(world, walk[0] + 0.5D, floorY + 1.0D, walk[1] + 0.5D))) {
+            return null;
+        }
+        return DiggerPit.stairStandInward(world, pit, walk, floorY);
+    }
+
+    private static void ensureStairAt(
+            World world,
+            SoulGolemData pit,
+            GolemSettings.Digger digger,
+            int floorY,
+            int stairIndex
+    ) {
+        int radius = DiggerPit.radius(digger);
+        int[] walk = DiggerPit.stairWalkCell(pit, radius, stairIndex);
+        Block stair = world.getBlockAt(walk[0], floorY, walk[1]);
+        if (!DiggerPit.isStairBlock(stair)) {
+            DiggerPit.placeStair(world, pit, digger, floorY, stairIndex);
+        }
     }
 
     static boolean hasUsableStairNearby(CopperGolem copper, SoulGolemData pit) {

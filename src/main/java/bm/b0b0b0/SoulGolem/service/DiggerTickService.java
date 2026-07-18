@@ -184,6 +184,7 @@ public final class DiggerTickService {
         }
 
         if (golem.data().paused()) {
+            this.dig.logTick(golem, "tick-paused");
             GolemDisplay.refresh(
                     golem,
                     copper,
@@ -205,7 +206,7 @@ public final class DiggerTickService {
                 || DiggerPit.isFluidHazard(feet.getBlock())
                 || DiggerPit.isFluidHazard(feet.getBlock().getRelative(org.bukkit.block.BlockFace.DOWN));
         if (fluidNearby) {
-            DiggerPit.sealAround(feet, 3, 2, Math.max(2, this.context.digger().caveSafeDepth), seal);
+            DiggerPit.sealFluidsBelowFeet(feet, pit, this.context.digger(), 3);
             DiggerPit.sealPitFluids(pit, this.context.digger(), this.context.farmAreaService());
         } else if (!golem.data().isCrewHelper()
                 && pit.hasDigProgress()
@@ -224,14 +225,29 @@ public final class DiggerTickService {
                 || state == DiggerState.CLOSING_GATE;
         SoulGolemData pitData = this.context.pitData(golem);
         boolean linkedChest = this.context.chestLink().isLinked(pitData);
-        boolean crewReturn = DiggerDigWork.isCrewReturning(golem, pitData, this.context.digger().maxDepth);
-        if (linkedChest && !crewReturn && (state == DiggerState.ESCAPING || state == DiggerState.MOVING_TO_CHEST)) {
+        boolean crewReturn = DiggerDigWork.isCrewReturning(golem, pitData, this.context.digger());
+        boolean leaderAscent = DiggerDigWork.needsLeaderAscent(
+                golem,
+                pitData,
+                this.context.digger(),
+                copper.getLocation()
+        );
+        if (linkedChest && !crewReturn && !leaderAscent
+                && (state == DiggerState.ESCAPING || state == DiggerState.MOVING_TO_CHEST)) {
             golem.clearFetchFlags();
             golem.diggerState(DiggerState.IDLE);
             state = DiggerState.IDLE;
         }
         if (!setupBusy && !fenceDuty && state != DiggerState.ESCAPING) {
-            if ((!linkedChest || crewReturn) && this.escape.needsEscape(golem, copper)) {
+            boolean activeLayerWork = pit.hasDigProgress()
+                    && !DiggerDigWork.isPitComplete(pit, this.context.digger())
+                    && DiggerDigWork.layerHasDiggable(
+                            pit,
+                            this.context.chestService(),
+                            this.context.farmAreaService(),
+                            this.context.digger()
+                    );
+            if ((!linkedChest || crewReturn) && !activeLayerWork && this.escape.needsEscape(golem, copper)) {
                 this.escape.startEscape(golem);
                 state = DiggerState.ESCAPING;
             } else if (DiggerSafety.needsRescue(
@@ -264,11 +280,12 @@ public final class DiggerTickService {
                     golem.diggerState(DiggerState.IDLE);
                     state = DiggerState.IDLE;
                 } else if ((!linkedChest || crewReturn)
+                        && !activeLayerWork
                         && this.escape.wantsSurface(golem)
                         && here.getY() < data.homeY() - 1.4D) {
                     this.escape.startEscape(golem);
                     state = DiggerState.ESCAPING;
-                } else if (safe != null) {
+                } else if (safe != null && !activeLayerWork) {
                     golem.wanderTarget(null);
                     golem.clearPathWaypoint();
                     this.context.walkTowards(copper, safe, golem);
@@ -278,7 +295,7 @@ public final class DiggerTickService {
 
         long now = System.currentTimeMillis();
         long diggerInterval = Math.max(1L, this.context.digger().workIntervalTicks) * 50L;
-        long effectiveInterval = Math.max(50L, (long) (diggerInterval * this.context.stickBoostFactor(golem)));
+        long effectiveInterval = Math.max(25L, (long) (diggerInterval / this.context.stickBoostFactor(golem)));
         if (!setupBusy
                 && state != DiggerState.DIGGING
                 && state != DiggerState.MOVING_TO_DIG
@@ -298,7 +315,17 @@ public final class DiggerTickService {
                 && state != DiggerState.SHELTERING
                 && state != DiggerState.MOVING_TO_COMBAT
                 && state != DiggerState.COMBATING
+                && state != DiggerState.MOVING_TO_FENCE_CLEAR
+                && state != DiggerState.MOVING_TO_FENCE
+                && state != DiggerState.MOVING_TO_GATE
+                && state != DiggerState.MOVING_TO_CLOSE_GATE
                 && now - data.lastActionAt() < effectiveInterval) {
+            this.dig.logTick(golem, "tick-wait state=" + state
+                    + " leftMs=" + (effectiveInterval - (now - data.lastActionAt()))
+                    + " intervalMs=" + effectiveInterval
+                    + " target=" + (golem.targetOre() == null ? "none" : (
+                    golem.targetOre().getBlockX() + "," + golem.targetOre().getBlockY()
+                            + "," + golem.targetOre().getBlockZ())));
             GolemDisplay.refresh(
                     golem,
                     copper,

@@ -5,8 +5,12 @@ import bm.b0b0b0.SoulGolem.message.MessageService;
 import bm.b0b0b0.SoulGolem.model.ActiveGolem;
 import bm.b0b0b0.SoulGolem.model.GolemType;
 import bm.b0b0b0.SoulGolem.util.PluginKeys;
+import org.bukkit.Bukkit;
 import org.bukkit.Location;
+import org.bukkit.Tag;
 import org.bukkit.World;
+import org.bukkit.block.Block;
+import org.bukkit.block.BlockFace;
 import org.bukkit.entity.CopperGolem;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.TextDisplay;
@@ -37,9 +41,12 @@ public final class GolemDisplay {
         if (!golem.setupComplete() && bm.b0b0b0.SoulGolem.service.setup.GolemSetupWork.isSetupState(golem)) {
             return "golem-status-setup";
         }
+        if (golem.workBoostActive()) {
+            return "golem-status-stick-boost";
+        }
         if (golem.data().type() == GolemType.DIGGER) {
             return switch (golem.diggerState()) {
-                case DIGGING, MOVING_TO_DIG -> "golem-status-digging";
+                case DIGGING, MOVING_TO_DIG -> onPitStair(golem) ? "golem-status-idle" : "golem-status-digging";
                 case PLACING_STAIR -> "golem-status-placing-stair";
                 case ESCAPING -> golem.crewReturning() ? "golem-status-crew-return" : "golem-status-escaping";
                 case DONE -> "golem-status-dig-done";
@@ -80,7 +87,8 @@ public final class GolemDisplay {
                 case MOVING_TO_SETUP_CLEAR, SETUP_CLEAR,
                      MOVING_TO_SETUP_BORDER, SETUP_BORDER,
                      MOVING_TO_SETUP_CHEST, SETUP_CHEST -> "golem-status-setup";
-                default -> "golem-status-working";
+                case IDLE -> "golem-status-idle";
+                default -> golem.targetOre() != null ? "golem-status-digging" : "golem-status-idle";
             };
         }
         if (golem.data().type() == GolemType.FARMER) {
@@ -395,5 +403,15 @@ public final class GolemDisplay {
             display.leaveVehicle();
         }
         copper.addPassenger(display);
+    }
+
+    private static boolean onPitStair(ActiveGolem golem) {
+        World world = Bukkit.getWorld(golem.data().worldName());
+        if (world == null) {
+            return false;
+        }
+        Location feet = new Location(world, golem.data().x(), golem.data().y(), golem.data().z());
+        Block below = feet.getBlock().getRelative(BlockFace.DOWN);
+        return Tag.STAIRS.isTagged(below.getType());
     }
 }

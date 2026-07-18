@@ -8,7 +8,7 @@ import org.bukkit.block.Block;
 
 final class DiggerClaims {
 
-    private static final long TTL_MS = 2_500L;
+    private static final long TTL_MS = 18_000L;
     private static final Map<Long, Claim> CLAIMS = new ConcurrentHashMap<>();
 
     private DiggerClaims() {
@@ -58,6 +58,21 @@ final class DiggerClaims {
         if (existing != null && existing.diggerId.equals(diggerId)) {
             CLAIMS.remove(key);
         }
+    }
+
+    static Long claimAgeMs(UUID pitId, Block block) {
+        Claim existing = getFresh(pitId, block);
+        if (existing == null) {
+            return null;
+        }
+        return System.currentTimeMillis() - existing.at;
+    }
+
+    static void forceRelease(UUID pitId, Block block) {
+        if (pitId == null || block == null) {
+            return;
+        }
+        CLAIMS.remove(pack(pitId, block.getX(), block.getY(), block.getZ()));
     }
 
     private static Claim getFresh(UUID pitId, Block block) {

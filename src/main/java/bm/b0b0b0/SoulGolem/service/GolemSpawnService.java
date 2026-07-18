@@ -276,7 +276,8 @@ public final class GolemSpawnService {
         golem.setAI(true);
         golem.setCanPickupItems(false);
         golem.setSilent(false);
-        golem.setInvulnerable(true);
+        golem.setInvulnerable(false);
+        golem.setCollidable(true);
         golem.setFireTicks(0);
         golem.setRemainingAir(golem.getMaximumAir());
         golem.setTarget(null);
@@ -467,7 +468,8 @@ public final class GolemSpawnService {
                 active.setupComplete(true);
                 active.setupPhase(SetupPhase.DONE);
                 if (data.type() == GolemType.DIGGER) {
-                    DiggerDigWork.ensureDigProgress(data);
+                    DiggerDigWork.ensureDigProgress(data, config().golems().digger, this.farmAreaService);
+                    bm.b0b0b0.SoulGolem.service.digger.DiggerPit.clearStairStructureAboveGround(data, config().golems().digger);
                     active.diggerState(DiggerState.IDLE);
                 }
             } else if (chestPresent) {
@@ -514,7 +516,8 @@ public final class GolemSpawnService {
                     active.fieldReady(false);
                 }
                 if (data.type() == GolemType.DIGGER) {
-                    DiggerDigWork.ensureDigProgress(data);
+                    DiggerDigWork.ensureDigProgress(data, config().golems().digger, this.farmAreaService);
+                    bm.b0b0b0.SoulGolem.service.digger.DiggerPit.clearStairStructureAboveGround(data, config().golems().digger);
                     active.diggerState(DiggerState.IDLE);
                 }
                 active.setupComplete(true);

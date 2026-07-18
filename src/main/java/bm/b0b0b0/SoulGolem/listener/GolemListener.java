@@ -5,6 +5,7 @@ import bm.b0b0b0.SoulGolem.gui.GolemGuiService;
 import bm.b0b0b0.SoulGolem.item.StatueItemFactory;
 import bm.b0b0b0.SoulGolem.message.MessageService;
 import bm.b0b0b0.SoulGolem.model.ActiveGolem;
+import bm.b0b0b0.SoulGolem.model.DiggerState;
 import bm.b0b0b0.SoulGolem.model.GolemType;
 import bm.b0b0b0.SoulGolem.repository.GolemRepository;
 import bm.b0b0b0.SoulGolem.service.FarmAreaService;
@@ -19,6 +20,7 @@ import bm.b0b0b0.SoulGolem.service.digger.DiggerPit;
 import bm.b0b0b0.SoulGolem.util.PluginKeys;
 import java.util.Optional;
 import java.util.UUID;
+import org.bukkit.Color;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -56,6 +58,7 @@ import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.util.Vector;
 import org.bukkit.persistence.PersistentDataType;
 
 public final class GolemListener implements Listener {
@@ -201,6 +204,29 @@ public final class GolemListener implements Listener {
         );
     }
 
+    private boolean isOwnerChestUnderBuild(Player player, Block block) {
+        if (player == null || block == null) {
+            return false;
+        }
+        if (this.chestService.isSoulChest(block) || stationGolemId(block) != null) {
+            return false;
+        }
+        int depth = Math.max(0, this.configurationLoader.config().golems().ownerChestUnderDepth);
+        if (depth <= 0) {
+            return false;
+        }
+        UUID playerId = player.getUniqueId();
+        for (ActiveGolem golem : this.registry.all()) {
+            if (!playerId.equals(golem.data().ownerUuid())) {
+                continue;
+            }
+            if (this.chestService.isUnderSoulChestColumn(golem.data(), block, depth)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private boolean isOwnerGateBreak(Player player, Block block) {
         return isTerritoryOwner(player, block)
                 && block != null
@@ -304,7 +330,8 @@ public final class GolemListener implements Listener {
         if (!isTerritory(block)) {
             return;
         }
-        if (canBypassTerritory(player) || isOwnerCropBreak(player, block) || isOwnerDiggerAssistBreak(player, block)) {
+        if (canBypassTerritory(player) || isOwnerCropBreak(player, block) || isOwnerDiggerAssistBreak(player, block)
+                || isOwnerChestUnderBuild(player, block)) {
             return;
         }
         if (isOwnerGateBreak(player, block)) {
@@ -327,6 +354,9 @@ public final class GolemListener implements Listener {
             return;
         }
         if (Tag.FENCE_GATES.isTagged(block.getType()) && isTerritoryOwner(player, block)) {
+            return;
+        }
+        if (isOwnerChestUnderBuild(player, block)) {
             return;
         }
         event.setCancelled(true);
@@ -385,7 +415,11 @@ public final class GolemListener implements Listener {
             return;
         }
         if (event.getAction() == Action.LEFT_CLICK_BLOCK
-                && (isOwnerCropBreak(player, block) || isOwnerDiggerAssistBreak(player, block))) {
+                && (isOwnerCropBreak(player, block) || isOwnerDiggerAssistBreak(player, block)
+                || isOwnerChestUnderBuild(player, block))) {
+            return;
+        }
+        if (event.getAction() == Action.RIGHT_CLICK_BLOCK && isOwnerChestUnderBuild(player, block)) {
             return;
         }
         if (event.getAction() == Action.LEFT_CLICK_BLOCK && isOwnerGateBreak(player, block)) {
@@ -502,7 +536,7 @@ public final class GolemListener implements Listener {
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onHopperMove(InventoryMoveItemEvent event) {
-        if (isSoulInventory(event.getSource().getLocation()) || isSoulInventory(event.getDestination().getLocation())) {
+        if (isSoulInventory(event.getDestination().getLocation())) {
             event.setCancelled(true);
         }
     }
@@ -628,6 +662,12 @@ public final class GolemListener implements Listener {
                 messages().send(player, "protect-not-owner");
                 return;
             }
+            if (holdingStick(player) && this.configurationLoader.config().golems().stickBoostEnabled) {
+                applyStickBoost(golem, entity, player);
+                event.setCancelled(true);
+                messages().send(player, "golem-stick-boost");
+                return;
+            }
             if (player.getGameMode() == GameMode.CREATIVE || player.isSneaking()) {
                 event.setCancelled(true);
                 this.spawnService.removeGolem(golem.data().id(), player);
@@ -636,36 +676,79 @@ public final class GolemListener implements Listener {
                 }
                 return;
             }
-            ItemStack hand = player.getInventory().getItemInMainHand();
-            if (hand != null
-                    && hand.getType() == Material.STICK
-                    && this.configurationLoader.config().golems().stickBoostEnabled) {
-                event.setCancelled(true);
-                long duration = Math.max(1000L, this.configurationLoader.config().golems().stickBoostDurationMs);
-                golem.workBoostUntilMs(System.currentTimeMillis() + duration);
-                golem.data().lastActionAt(0L);
-                playStickBoostFx(entity.getLocation());
-                messages().send(player, "golem-stick-boost");
-                return;
-            }
         }
         event.setCancelled(true);
     }
 
-    private void playStickBoostFx(Location at) {
+    private static boolean holdingStick(Player player) {
+        ItemStack main = player.getInventory().getItemInMainHand();
+        if (main != null && main.getType() == Material.STICK) {
+            return true;
+        }
+        ItemStack off = player.getInventory().getItemInOffHand();
+        return off != null && off.getType() == Material.STICK;
+    }
+
+    private void applyStickBoost(ActiveGolem golem, Entity entity, Player player) {
+        long duration = Math.max(1000L, this.configurationLoader.config().golems().stickBoostDurationMs);
+        golem.workBoostUntilMs(System.currentTimeMillis() + duration);
+        golem.data().lastActionAt(0L);
+        if (golem.diggerState() == DiggerState.DIGGING) {
+            golem.mineTicksLeft(1L);
+        }
+        if (entity instanceof CopperGolem copper) {
+            nudgeFromSlap(copper, player);
+        }
+        playStickBoostFx(entity.getLocation(), player);
+    }
+
+    private static void nudgeFromSlap(CopperGolem copper, Player player) {
+        if (copper == null || player == null) {
+            return;
+        }
+        Vector away = copper.getLocation().toVector().subtract(player.getLocation().toVector());
+        away.setY(0.04D);
+        if (away.lengthSquared() < 0.01D) {
+            away = player.getLocation().getDirection().multiply(-0.05D);
+            away.setY(0.04D);
+        } else {
+            away.normalize().multiply(0.05D);
+        }
+        copper.setVelocity(away);
+    }
+
+    private void playStickBoostFx(Location at, Player player) {
         if (at == null || at.getWorld() == null) {
             return;
         }
         World world = at.getWorld();
-        Location fx = at.clone().add(0.0D, 0.9D, 0.0D);
-        world.spawnParticle(Particle.ANGRY_VILLAGER, fx, 6, 0.25D, 0.35D, 0.25D, 0.0D);
-        world.spawnParticle(Particle.CRIT, fx, 12, 0.3D, 0.4D, 0.3D, 0.05D);
-        Sound sound = Registry.SOUNDS.get(NamespacedKey.minecraft("entity.copper_golem.hurt"));
-        if (sound == null) {
-            sound = Registry.SOUNDS.get(NamespacedKey.minecraft("entity.iron_golem.hurt"));
+        Location fx = at.clone().add(0.0D, 0.95D, 0.0D);
+
+        world.spawnParticle(Particle.CRIT, fx, 10, 0.22D, 0.28D, 0.22D, 0.08D);
+        world.spawnParticle(Particle.CLOUD, fx, 4, 0.15D, 0.12D, 0.15D, 0.02D);
+        world.spawnParticle(
+                Particle.DUST,
+                fx,
+                8,
+                0.22D,
+                0.25D,
+                0.22D,
+                0.0D,
+                new Particle.DustOptions(Color.fromRGB(253, 224, 71), 1.1F)
+        );
+
+        playSound(world, fx, "entity.player.attack.weak", 0.4F, 1.45F);
+        playSound(world, fx, "block.note_block.pling", 0.55F, 1.85F);
+        playSound(world, fx, "entity.copper_golem.hurt", 0.25F, 1.75F);
+        if (player != null) {
+            player.playSound(fx, Sound.ENTITY_EXPERIENCE_ORB_PICKUP, 0.25F, 1.7F);
         }
+    }
+
+    private static void playSound(World world, Location at, String key, float volume, float pitch) {
+        Sound sound = Registry.SOUNDS.get(NamespacedKey.minecraft(key));
         if (sound != null) {
-            world.playSound(fx, sound, 0.55F, 1.35F);
+            world.playSound(at, sound, volume, pitch);
         }
     }
 

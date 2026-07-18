@@ -521,7 +521,11 @@ public final class GolemSetupWork {
             golem.fieldReady(false);
             golem.farmerState(FarmerState.WAITING_SEEDS);
         } else if (data.type() == GolemType.DIGGER) {
-            DiggerDigWork.ensureDigProgress(data);
+            DiggerDigWork.ensureDigProgress(
+                    data,
+                    this.chestService.config().golems().digger,
+                    this.farmAreaService
+            );
             golem.diggerState(DiggerState.IDLE);
         }
         golem.data().lastActionAt(System.currentTimeMillis());

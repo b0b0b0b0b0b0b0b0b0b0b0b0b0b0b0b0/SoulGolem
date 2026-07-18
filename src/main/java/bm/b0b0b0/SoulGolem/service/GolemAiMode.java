@@ -39,10 +39,10 @@ public final class GolemAiMode {
             return;
         }
         copper.setAI(false);
-        copper.setAware(false);
+        copper.setAware(true);
         copper.setGravity(false);
-        copper.setCollidable(false);
-        copper.setNoPhysics(true);
+        copper.setCollidable(true);
+        copper.setNoPhysics(false);
         Bukkit.getMobGoals().removeAllGoals(copper);
         if (movement != null) {
             movement.stop(copper);

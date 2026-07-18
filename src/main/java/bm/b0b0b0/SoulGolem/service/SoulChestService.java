@@ -37,6 +37,10 @@ public final class SoulChestService {
     private String chestNameRaw;
     private String craftNameRaw;
 
+    public PluginConfig config() {
+        return this.config;
+    }
+
     public SoulChestService(Plugin plugin, PluginKeys keys, PluginConfig config, String chestNameRaw, String craftNameRaw) {
         this.plugin = plugin;
         this.keys = keys;
@@ -967,6 +971,20 @@ public final class SoulChestService {
         int py = (int) Math.floor(data.compostY());
         int pz = (int) Math.floor(data.compostZ());
         return block.getX() == px && block.getZ() == pz && (block.getY() == py || block.getY() == py - 1);
+    }
+
+    public boolean isUnderSoulChestColumn(SoulGolemData data, Block block, int depth) {
+        if (data == null || block == null || depth <= 0) {
+            return false;
+        }
+        int cx = (int) Math.floor(data.chestX());
+        int cy = (int) Math.floor(data.chestY());
+        int cz = (int) Math.floor(data.chestZ());
+        if (block.getX() != cx || block.getZ() != cz) {
+            return false;
+        }
+        int y = block.getY();
+        return y < cy && y >= cy - depth;
     }
 
     public boolean isStationBlock(Material type) {

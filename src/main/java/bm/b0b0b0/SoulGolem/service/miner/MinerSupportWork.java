@@ -77,7 +77,7 @@ public final class MinerSupportWork {
         }
         if (GolemMovement.horizontalDistanceSquared(copper.getLocation(), stand) > 2.25D) {
             golem.state(MinerState.MOVING_TO_CLEAR);
-            this.ctx.walkTowards(copper, stand, golem.data());
+            this.ctx.walkTowards(copper, stand, golem);
             return;
         }
         copper.setVelocity(new Vector(0, 0, 0));

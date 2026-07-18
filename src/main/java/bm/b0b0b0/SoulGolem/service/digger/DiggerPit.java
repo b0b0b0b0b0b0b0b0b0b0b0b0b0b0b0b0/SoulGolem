@@ -211,7 +211,7 @@ public final class DiggerPit {
         if (!data.hasDigProgress()) {
             return 0;
         }
-        int startY = data.digStartY();
+        int startY = Math.min(data.digStartY(), (int) Math.floor(data.homeY()));
         if (y >= startY) {
             return 0;
         }
@@ -255,58 +255,50 @@ public final class DiggerPit {
     }
 
     public static int placeStair(World world, SoulGolemData data, GolemSettings.Digger digger, int y, int stairIndex) {
+        if (y > (int) Math.floor(data.homeY())) {
+            return 1;
+        }
         Material stairMat = Material.matchMaterial(digger.stairMaterial);
         if (stairMat == null || !Tag.STAIRS.isTagged(stairMat)) {
             stairMat = Material.STONE_STAIRS;
         }
         Material support = stairSupportMaterial(digger);
         int radius = radius(digger);
-        List<int[]> ring = stairRingClockwise(data, radius);
-        if (ring.isEmpty()) {
+        int[] cell = stairCell(data, radius, stairIndex);
+        if (isStationColumn(data, cell[0], cell[1]) || isBorderColumn(data, cell[0], cell[1], radius)) {
             return 0;
         }
-        int start = stairStartIndex(data, radius);
-        int size = ring.size();
-        for (int offset = 0; offset < size; offset++) {
-            int logicalIndex = stairIndex + offset;
-            int idx = Math.floorMod(start + logicalIndex, size);
-            int[] cell = ring.get(idx);
-            if (isStationColumn(data, cell[0], cell[1]) || isBorderColumn(data, cell[0], cell[1], radius)) {
-                continue;
-            }
-            Block block = world.getBlockAt(cell[0], y, cell[1]);
-            if (!canPlaceStairStructure(block) && !Tag.STAIRS.isTagged(block.getType())) {
-                continue;
-            }
-
-            if (isCornerStairIndex(data, radius, logicalIndex)) {
-                placeSupportBlock(world, cell[0], y - 1, cell[1], support);
-                placeLandingBlock(world, cell[0], y, cell[1], support);
-                int[] next = stairCell(data, radius, logicalIndex + 1);
-                if (next[0] == cell[0] && next[1] == cell[1]) {
-                    return world.getBlockAt(cell[0], y, cell[1]).getType() == support ? 1 : 0;
-                }
-                Block nextBlock = world.getBlockAt(next[0], y, next[1]);
-                if (!canPlaceStairStructure(nextBlock) && !Tag.STAIRS.isTagged(nextBlock.getType())) {
-                    return world.getBlockAt(cell[0], y, cell[1]).getType() == support ? 1 : 0;
-                }
-                placeSupportBlock(world, next[0], y - 1, next[1], support);
-                nextBlock.setType(stairMat, false);
-                applyStairData(nextBlock, data, radius, logicalIndex + 1);
-                boolean landingOk = world.getBlockAt(cell[0], y, cell[1]).getType() == support;
-                boolean stairOk = Tag.STAIRS.isTagged(nextBlock.getType());
-                if (landingOk && stairOk) {
-                    return 2;
-                }
-                return landingOk || stairOk ? 1 : 0;
-            }
-
-            placeSupportBlock(world, cell[0], y - 1, cell[1], support);
-            block.setType(stairMat, false);
-            applyStairData(block, data, radius, logicalIndex);
-            return Tag.STAIRS.isTagged(block.getType()) ? 1 : 0;
+        Block block = world.getBlockAt(cell[0], y, cell[1]);
+        if (!canPlaceStairStructure(block) && !Tag.STAIRS.isTagged(block.getType())) {
+            return 0;
         }
-        return 0;
+
+        if (isCornerStairIndex(data, radius, stairIndex)) {
+            placeSupportBlock(world, cell[0], y - 1, cell[1], support);
+            placeLandingBlock(world, cell[0], y, cell[1], support);
+            int[] next = stairCell(data, radius, stairIndex + 1);
+            if (next[0] == cell[0] && next[1] == cell[1]) {
+                return world.getBlockAt(cell[0], y, cell[1]).getType() == support ? 1 : 0;
+            }
+            Block nextBlock = world.getBlockAt(next[0], y, next[1]);
+            if (!canPlaceStairStructure(nextBlock) && !Tag.STAIRS.isTagged(nextBlock.getType())) {
+                return world.getBlockAt(cell[0], y, cell[1]).getType() == support ? 1 : 0;
+            }
+            placeSupportBlock(world, next[0], y - 1, next[1], support);
+            nextBlock.setType(stairMat, false);
+            applyStairData(nextBlock, data, radius, stairIndex + 1);
+            boolean landingOk = world.getBlockAt(cell[0], y, cell[1]).getType() == support;
+            boolean stairOk = Tag.STAIRS.isTagged(nextBlock.getType());
+            if (landingOk && stairOk) {
+                return 2;
+            }
+            return landingOk || stairOk ? 1 : 0;
+        }
+
+        placeSupportBlock(world, cell[0], y - 1, cell[1], support);
+        block.setType(stairMat, false);
+        applyStairData(block, data, radius, stairIndex);
+        return Tag.STAIRS.isTagged(block.getType()) ? 1 : 0;
     }
 
     public static boolean isStairStructureBlock(Block block, SoulGolemData data, GolemSettings.Digger digger) {
@@ -317,9 +309,10 @@ public final class DiggerPit {
         int x = block.getX();
         int z = block.getZ();
         int y = block.getY();
-        int top = data.digStartY();
-        int bottom = Math.min(data.digLayerY(), top) - 1;
         Material support = stairSupportMaterial(digger);
+        int homeFloor = (int) Math.floor(data.homeY());
+        int top = Math.min(data.digStartY(), homeFloor);
+        int bottom = Math.min(data.digLayerY(), top) - 1;
         int index = 0;
         for (int sy = top; sy >= bottom; sy--) {
             boolean corner = isCornerStairIndex(data, radius, index);
@@ -331,17 +324,22 @@ public final class DiggerPit {
                 if (corner && y == sy && block.getType() == support) {
                     return true;
                 }
+                if (!corner && y == sy && Tag.STAIRS.isTagged(block.getType())) {
+                    return true;
+                }
             }
             if (corner) {
                 int[] next = stairCell(data, radius, index + 1);
-                if (x == next[0] && z == next[1] && (y == sy || y == sy - 1)) {
-                    return true;
+                if (x == next[0] && z == next[1]) {
+                    if (y == sy - 1) {
+                        return true;
+                    }
+                    if (y == sy && (Tag.STAIRS.isTagged(block.getType()) || block.getType() == support)) {
+                        return true;
+                    }
                 }
                 index += 2;
             } else {
-                if (x == cell[0] && z == cell[1] && y == sy - 1) {
-                    return true;
-                }
                 index += 1;
             }
         }
@@ -430,23 +428,54 @@ public final class DiggerPit {
             return;
         }
         int radius = radius(digger);
-        int startY = data.digStartY();
+        int startY = Math.min(data.digStartY(), (int) Math.floor(data.homeY()));
         int lowest = Math.min(bottomY, data.digLayerY());
-        int index = 0;
         for (int y = startY; y >= lowest; y--) {
-            int used = placeStair(world, data, digger, y, index);
-            if (used <= 0) {
-                used = stairSteps(data, radius, index);
-            }
-            index += Math.max(1, used);
+            placeStair(world, data, digger, y, stairIndexForY(data, radius, y));
         }
-        if (data.digStairIndex() < index) {
-            data.digStairIndex(index);
-        }
+        data.digStairIndex(stairIndexForY(data, radius, data.digLayerY()));
     }
 
     public static boolean isStairBlock(Block block) {
         return block != null && Tag.STAIRS.isTagged(block.getType());
+    }
+
+    public static boolean isOnStairRing(SoulGolemData data, int radius, int x, int z) {
+        if (!isInsidePit(data, x, z, radius)) {
+            return false;
+        }
+        return x == digMinX(data, radius) || x == digMaxX(data, radius)
+                || z == digMinZ(data, radius) || z == digMaxZ(data, radius);
+    }
+
+    public static boolean isBedrockFloorLayer(SoulGolemData data, World world, int radius) {
+        if (data == null || world == null || !data.hasDigProgress()) {
+            return false;
+        }
+        int y = data.digLayerY();
+        if (y <= world.getMinHeight()) {
+            return true;
+        }
+        int r = Math.max(2, radius);
+        int bedrock = 0;
+        int otherSolid = 0;
+        for (int z = digMinZ(data, r); z <= digMaxZ(data, r); z++) {
+            for (int x = digMinX(data, r); x <= digMaxX(data, r); x++) {
+                if (isStationColumn(data, x, z)) {
+                    continue;
+                }
+                Material type = world.getBlockAt(x, y, z).getType();
+                if (type.isAir() || Tag.STAIRS.isTagged(type) || Tag.CLIMBABLE.isTagged(type)) {
+                    continue;
+                }
+                if (type == Material.BEDROCK || type == Material.BARRIER) {
+                    bedrock++;
+                } else if (type.isSolid()) {
+                    otherSolid++;
+                }
+            }
+        }
+        return bedrock > 0 && otherSolid == 0;
     }
 
     public static boolean isCurrentStairSlot(SoulGolemData data, GolemSettings.Digger digger, int x, int y, int z) {
@@ -454,7 +483,7 @@ public final class DiggerPit {
             return false;
         }
         int radius = radius(digger);
-        int index = data.digStairIndex();
+        int index = stairIndexForY(data, radius, y);
         int[] cell = stairCell(data, radius, index);
         if (cell[0] == x && cell[1] == z) {
             return true;
@@ -476,7 +505,7 @@ public final class DiggerPit {
         if (SoulChestService.isChestLike(type) || type == Material.CRAFTING_TABLE || type == Material.COMPOSTER) {
             return true;
         }
-        if (Tag.STAIRS.isTagged(type) || Tag.CLIMBABLE.isTagged(type) || type == Material.LADDER) {
+        if (Tag.CLIMBABLE.isTagged(type) || type == Material.LADDER) {
             return true;
         }
         if (chestService != null && chestService.isChestColumn(data, block)) {
@@ -500,9 +529,18 @@ public final class DiggerPit {
         }
         int radius = radius(digger);
         int x = block.getX();
+        int y = block.getY();
         int z = block.getZ();
         if (!isInsidePit(data, x, z, radius)) {
             return false;
+        }
+        if (data.hasDigProgress()) {
+            if (y != data.digLayerY()) {
+                return false;
+            }
+            if (y > data.digStartY()) {
+                return false;
+            }
         }
         if (isBorderColumn(data, x, z, radius) || isStationColumn(data, x, z)) {
             return false;
@@ -523,6 +561,142 @@ public final class DiggerPit {
     public static boolean isDiggable(Block block, SoulGolemData data, SoulChestService chestService, FarmAreaService farmArea) {
         GolemSettings.Digger digger = new GolemSettings.Digger();
         return isDiggable(block, data, chestService, farmArea, digger);
+    }
+
+    public static int findHighestPitFillY(SoulGolemData data, GolemSettings.Digger digger, FarmAreaService farmArea) {
+        World world = org.bukkit.Bukkit.getWorld(data.worldName());
+        int homeY = (int) Math.floor(data.homeY());
+        if (world == null) {
+            return homeY;
+        }
+        int radius = radius(digger);
+        int scanTop = Math.min(world.getMaxHeight() - 1, homeY + 16);
+        int scanBottom = Math.max(world.getMinHeight(), homeY - 2);
+        int highest = Integer.MIN_VALUE;
+        for (int z = digMinZ(data, radius); z <= digMaxZ(data, radius); z++) {
+            for (int x = digMinX(data, radius); x <= digMaxX(data, radius); x++) {
+                if (isStationColumn(data, x, z)) {
+                    continue;
+                }
+                for (int y = scanTop; y >= scanBottom; y--) {
+                    Block block = world.getBlockAt(x, y, z);
+                    if (!isPitFillBlock(block, farmArea)) {
+                        continue;
+                    }
+                    if (isOnStairRing(data, radius, x, z)
+                            && (block.getType() == stairSupportMaterial(digger) || Tag.STAIRS.isTagged(block.getType()))) {
+                        continue;
+                    }
+                    if (isStairStructureBlock(block, data, digger)) {
+                        continue;
+                    }
+                    if (highest < y) {
+                        highest = y;
+                    }
+                    break;
+                }
+            }
+        }
+        return highest == Integer.MIN_VALUE ? homeY : highest;
+    }
+
+    public static int findHighestPitFillAbove(
+            SoulGolemData data,
+            GolemSettings.Digger digger,
+            FarmAreaService farmArea,
+            int aboveY
+    ) {
+        World world = org.bukkit.Bukkit.getWorld(data.worldName());
+        if (world == null) {
+            return Integer.MIN_VALUE;
+        }
+        int homeY = (int) Math.floor(data.homeY());
+        int radius = radius(digger);
+        int scanTop = Math.min(world.getMaxHeight() - 1, Math.max(homeY + 16, aboveY + 16));
+        int highest = Integer.MIN_VALUE;
+        for (int z = digMinZ(data, radius); z <= digMaxZ(data, radius); z++) {
+            for (int x = digMinX(data, radius); x <= digMaxX(data, radius); x++) {
+                if (isStationColumn(data, x, z)) {
+                    continue;
+                }
+                for (int y = scanTop; y > aboveY; y--) {
+                    Block block = world.getBlockAt(x, y, z);
+                    if (!isPitFillBlock(block, farmArea)) {
+                        continue;
+                    }
+                    if (isOnStairRing(data, radius, x, z)
+                            && (block.getType() == stairSupportMaterial(digger) || Tag.STAIRS.isTagged(block.getType()))) {
+                        continue;
+                    }
+                    if (isStairStructureBlock(block, data, digger)) {
+                        continue;
+                    }
+                    if (highest < y) {
+                        highest = y;
+                    }
+                    break;
+                }
+            }
+        }
+        return highest;
+    }
+
+    private static boolean isPitFillBlock(Block block, FarmAreaService farmArea) {
+        if (block == null) {
+            return false;
+        }
+        Material type = block.getType();
+        if (type.isAir() || type == Material.BEDROCK || type == Material.BARRIER
+                || type == Material.COMMAND_BLOCK || type == Material.CHAIN_COMMAND_BLOCK
+                || type == Material.REPEATING_COMMAND_BLOCK) {
+            return false;
+        }
+        if (SoulChestService.isChestLike(type) || type == Material.CRAFTING_TABLE || type == Material.COMPOSTER) {
+            return false;
+        }
+        if (Tag.STAIRS.isTagged(type) || Tag.CLIMBABLE.isTagged(type) || type == Material.LADDER) {
+            return false;
+        }
+        if (farmArea != null && farmArea.isBorderMaterial(type)) {
+            return false;
+        }
+        if (FarmAreaService.isFoliage(type) || FarmAreaService.isVegetation(type) || type == Material.SNOW) {
+            return false;
+        }
+        if (Tag.LOGS.isTagged(type)) {
+            return false;
+        }
+        return type.isSolid();
+    }
+
+    public static int clearStairStructureAboveGround(SoulGolemData data, GolemSettings.Digger digger) {
+        World world = org.bukkit.Bukkit.getWorld(data.worldName());
+        if (world == null) {
+            return 0;
+        }
+        Material stairMat = Material.matchMaterial(digger.stairMaterial);
+        if (stairMat == null || !Tag.STAIRS.isTagged(stairMat)) {
+            stairMat = Material.STONE_STAIRS;
+        }
+        Material support = stairSupportMaterial(digger);
+        int radius = radius(digger);
+        int homeFloor = (int) Math.floor(data.homeY());
+        int top = Math.min(world.getMaxHeight() - 1, homeFloor + 20);
+        int cleared = 0;
+        for (int[] cell : stairRingClockwise(data, radius)) {
+            if (isStationColumn(data, cell[0], cell[1])) {
+                continue;
+            }
+            for (int y = homeFloor + 1; y <= top; y++) {
+                Block at = world.getBlockAt(cell[0], y, cell[1]);
+                Material type = at.getType();
+                if (type == stairMat || type == support) {
+                    at.setType(Material.AIR, false);
+                    cleared++;
+                }
+            }
+        }
+        return cleared;
     }
 
     public static boolean isSoft(Material type) {
@@ -594,6 +768,77 @@ public final class DiggerPit {
             return;
         }
         sealAround(origin.getLocation().add(0.5D, 0.0D, 0.5D), 1, 0, Math.max(1, caveSafeDepth), seal);
+    }
+
+    public static int sealFluidsBelowFeet(
+            Location feet,
+            SoulGolemData data,
+            GolemSettings.Digger digger,
+            int range
+    ) {
+        if (feet == null || feet.getWorld() == null || data == null || digger == null) {
+            return 0;
+        }
+        Material seal = hazardSealMaterial(digger);
+        int maxY = data.hasDigProgress()
+                ? Math.min(data.digLayerY(), data.digStartY())
+                : (int) Math.floor(data.homeY());
+        maxY = Math.min(maxY, feet.getBlockY() - 1);
+        int r = Math.max(0, range);
+        int down = Math.max(2, digger.caveSafeDepth);
+        World world = feet.getWorld();
+        int ox = feet.getBlockX();
+        int oy = feet.getBlockY();
+        int oz = feet.getBlockZ();
+        int sealed = 0;
+        for (int dy = -down; dy <= 0; dy++) {
+            int y = oy + dy;
+            if (y > maxY) {
+                continue;
+            }
+            for (int dx = -r; dx <= r; dx++) {
+                for (int dz = -r; dz <= r; dz++) {
+                    Block at = world.getBlockAt(ox + dx, y, oz + dz);
+                    if (isFluidHazard(at)) {
+                        at.setType(seal, false);
+                        sealed++;
+                    }
+                }
+            }
+        }
+        clearRaisedSealPad(data, digger);
+        return sealed;
+    }
+
+    public static int clearRaisedSealPad(SoulGolemData data, GolemSettings.Digger digger) {
+        if (data == null || digger == null || !data.hasDigProgress()) {
+            return 0;
+        }
+        World world = org.bukkit.Bukkit.getWorld(data.worldName());
+        if (world == null) {
+            return 0;
+        }
+        Material fluidSeal = hazardSealMaterial(digger);
+        Material borderSeal = borderSealMaterial(digger);
+        int radius = radius(digger);
+        int top = data.digStartY();
+        int cleared = 0;
+        for (int z = digMinZ(data, radius); z <= digMaxZ(data, radius); z++) {
+            for (int x = digMinX(data, radius); x <= digMaxX(data, radius); x++) {
+                if (isBorderColumn(data, x, z, radius) || isStationColumn(data, x, z)) {
+                    continue;
+                }
+                for (int y = top + 1; y <= top + 3; y++) {
+                    Block at = world.getBlockAt(x, y, z);
+                    Material type = at.getType();
+                    if (type == fluidSeal || type == borderSeal) {
+                        at.setType(Material.AIR, false);
+                        cleared++;
+                    }
+                }
+            }
+        }
+        return cleared;
     }
 
     public static boolean hasFluidNear(Location location, int range) {
@@ -670,9 +915,7 @@ public final class DiggerPit {
         if (x < outerMinX || x > outerMaxX || z < outerMinZ || z > outerMaxZ) {
             return false;
         }
-        boolean outer = x == outerMinX || x == outerMaxX || z == outerMinZ || z == outerMaxZ;
-        boolean inner = x == minX || x == maxX || z == minZ || z == maxZ;
-        return outer || inner;
+        return x == outerMinX || x == outerMaxX || z == outerMinZ || z == outerMaxZ;
     }
 
     private static boolean isSealableGap(Block block) {
@@ -715,15 +958,20 @@ public final class DiggerPit {
         int maxX = digMaxX(data, radius) + 1;
         int minZ = digMinZ(data, radius) - 1;
         int maxZ = digMaxZ(data, radius) + 1;
-        int topY = data.hasDigProgress()
-                ? Math.max(data.digStartY(), (int) Math.floor(data.homeY())) + 1
-                : (int) Math.floor(data.homeY()) + 1;
-        int floorY = data.hasDigProgress() ? data.digLayerY() : (int) Math.floor(data.homeY());
-        int plannedBottom = data.hasDigProgress()
-                ? data.digStartY() - Math.max(1, digger.maxDepth)
-                : floorY - Math.max(1, digger.maxDepth);
+        int surfaceY = data.hasDigProgress()
+                ? Math.max(data.digStartY(), (int) Math.floor(data.homeY()))
+                : (int) Math.floor(data.homeY());
+        int floorY = data.hasDigProgress() ? data.digLayerY() : surfaceY;
+        int plannedBottom;
+        if (digger.maxDepth > 0) {
+            plannedBottom = data.hasDigProgress()
+                    ? data.digStartY() - digger.maxDepth
+                    : floorY - digger.maxDepth;
+        } else {
+            plannedBottom = world.getMinHeight();
+        }
         int bottomY = Math.max(world.getMinHeight(), Math.min(floorY - Math.max(1, digger.caveSafeDepth), plannedBottom));
-        topY = Math.min(world.getMaxHeight() - 1, topY);
+        int topY = Math.min(world.getMaxHeight() - 1, surfaceY);
         int probe = Math.max(1, digger.borderGapProbe);
         int sealed = 0;
 
@@ -743,11 +991,11 @@ public final class DiggerPit {
                         }
                     }
                 }
-                boolean fillColumn = border && gapBelow;
+                boolean fillColumn = border && gapBelow && !isInsidePit(data, x, z, radius);
                 int columnBottom = fillColumn ? Math.max(world.getMinHeight(), plannedBottom) : bottomY;
                 for (int y = columnBottom; y <= topY; y++) {
                     Block at = world.getBlockAt(x, y, z);
-                    if (isFluidHazard(at)) {
+                    if (isFluidHazard(at) && (border || y <= floorY)) {
                         at.setType(border ? borderSeal : fluidSeal, false);
                         sealed++;
                         continue;
@@ -759,6 +1007,7 @@ public final class DiggerPit {
                 }
             }
         }
+        sealed += clearRaisedSealPad(data, digger);
         return sealed;
     }
 

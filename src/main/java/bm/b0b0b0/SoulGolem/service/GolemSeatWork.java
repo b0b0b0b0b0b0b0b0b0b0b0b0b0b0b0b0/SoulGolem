@@ -128,9 +128,9 @@ public final class GolemSeatWork {
             beside = this.farmAreaService.safeStandNearHome(golem.data());
         }
         if (beside != null) {
-            copper.setNoPhysics(true);
+            copper.setNoPhysics(false);
             copper.setGravity(false);
-            copper.setCollidable(false);
+            copper.setCollidable(true);
             Location step = beside.clone();
             Location yawTarget = this.workAreaService.homeLocation(golem.data());
             if (yawTarget != null) {

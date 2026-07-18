@@ -175,6 +175,13 @@ public abstract class GolemWorkContext {
         return Math.max(1.0D, settings().stickBoostMultiplier);
     }
 
+    public double stickBoostWalkFactor(ActiveGolem golem) {
+        if (golem == null || !settings().stickBoostEnabled || !golem.workBoostActive()) {
+            return 1.0D;
+        }
+        return Math.max(1.0D, settings().stickBoostWalkMultiplier);
+    }
+
     public void applyStickBoost(ActiveGolem golem) {
         if (golem == null || !settings().stickBoostEnabled) {
             return;

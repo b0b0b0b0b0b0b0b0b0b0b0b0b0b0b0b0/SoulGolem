@@ -125,7 +125,7 @@ public final class MinerMineWork {
         golem.targetOre(ore);
         golem.oreMaterial(ore.getBlock().getType());
         golem.state(MinerState.MOVING_TO_ORE);
-        this.ctx.walkTowards(copper, ore.clone().add(0.5D, 1.0D, 0.5D), golem.data());
+        this.ctx.walkTowards(copper, ore.clone().add(0.5D, 1.0D, 0.5D), golem);
     }
 
     public void continueMoveToOre(ActiveGolem golem, CopperGolem copper) {
@@ -210,7 +210,7 @@ public final class MinerMineWork {
                 golem.targetOre(next);
                 golem.oreMaterial(next.getBlock().getType());
                 golem.state(MinerState.MOVING_TO_ORE);
-                this.ctx.walkTowards(copper, next.clone().add(0.5D, 1.0D, 0.5D), golem.data());
+                this.ctx.walkTowards(copper, next.clone().add(0.5D, 1.0D, 0.5D), golem);
                 return;
             }
         }
@@ -220,7 +220,7 @@ public final class MinerMineWork {
         if (!this.ctx.chestLink().isLinked(golem.data())) {
             Location chestStand = this.ctx.chestService().chestStandLocation(golem.data());
             if (chestStand != null) {
-                this.ctx.walkTowards(copper, chestStand, golem.data());
+                this.ctx.walkTowards(copper, chestStand, golem);
             }
         }
     }
